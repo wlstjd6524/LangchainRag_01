@@ -33,8 +33,9 @@ def web_search_esg(query: str, max_results: int = 5) -> str:
     Returns:
         검색 결과 요약 문자열 (출처 URL 포함)
     """
-    print("##### WEB_SEARCH TOOL #####")
     try:
+        print("##### WEB_SEARCH TOOL #####")
+        print(f"##### Query : {query} #####")
         response = tavily_client.invoke(query)
 
         # langchain-tavily 버전에 따라 dict 또는 list로 반환됨
