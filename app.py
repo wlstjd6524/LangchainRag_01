@@ -24,11 +24,19 @@ def chat(message: str, history: list) -> str:
         return run(langchain_messages)
     except Exception as e:
         return f"⚠️ 오류가 발생했습니다: {str(e)}"
+def chat(message: str, history: list, file) -> str:
+    if file is not None:
+        message = f"{message}\n파일 경로: {file.name}"
+    return run(message)
+
 
 demo = gr.ChatInterface(
     fn=chat,
     title="🌱 ESG 공시 가이드 에이전트",
     description="ESG 공시 관련 질문을 입력하세요. 가이드라인 검색, 보고서 초안 작성 등을 도와드립니다.",
+    additional_inputs=[
+        gr.File(label="CSV 파일 업로드", file_types=[".csv"]),
+    ],
     examples=[
         "전력을 500kWh 사용했을 때 탄소 배출량은?",
         "2025년 SK하이닉스 지속가능경영보고서의 핵심 내용을 요약해줘.",

@@ -10,8 +10,8 @@
 from .calculate_demo import calculate_carbon_emission
 from .search_pdf import search_pdf_tool  # ✅ 방금 개발한 RAG 검색 툴 임포트
 
-# 에이전트에게 쥐어줄 무기(Tool) 리스트
-tools = [
-    calculate_carbon_emission,
-    search_pdf_tool  # ✅ 리스트에 추가
-]
+from .web_search import web_search_esg
+from .calculate_safety import calculate_safety
+from .csv_loader import load_csv_data
+
+tools = [calculate_carbon_emission, search_pdf_tool, web_search_esg, calculate_safety, load_csv_data]

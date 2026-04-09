@@ -29,3 +29,6 @@ desktop.ini
 *.sqlite
 chroma_db/
 faiss_index/
+
+# 테스트 관련 로컬 파일
+./sample_data/
