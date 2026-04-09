@@ -76,8 +76,6 @@ except Exception as e:
     print(f"⚠️ RAG DB 로드 실패: {e}\ningest.py를 먼저 실행해주세요.")
 
 
-# ── 이하 기존 코드 완전 동일 ──────────────────────────────────────
-
 def _get_filtered_bm25(year, company, doc_category) -> BM25Retriever:
     filtered = docs
     if year:
