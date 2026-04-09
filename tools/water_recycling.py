@@ -1,7 +1,7 @@
 # tools/water_recycling.py
 from langchain_core.tools import tool
 # RAG 도구를 가져옵니다. (상대 경로 임포트)
-from .search_PDF import search_pdf_tool
+from .search_pdf import search_pdf_tool
 
 @tool
 def analyze_water_resource_circulation(
