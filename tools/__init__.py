@@ -10,5 +10,6 @@
 from .calculate_demo import calculate_carbon_emission
 from .web_search import web_search_esg
 from .calculate_safety import calculate_safety
+from .csv_loader import load_csv_data
 
-tools = [calculate_carbon_emission, web_search_esg, calculate_safety]
+tools = [calculate_carbon_emission, web_search_esg, calculate_safety, load_csv_data]
