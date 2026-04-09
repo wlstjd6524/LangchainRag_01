@@ -22,4 +22,5 @@ dependencies = [
     "chromadb>=0.6.0",    # ← Chroma 벡터 DB 의존성
     "langchain-classic>=1.0.2",
     "langchain-tavily>=0.2.17",
+    "boto3>=1.42.86",
 ]

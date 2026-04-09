@@ -1,5 +1,6 @@
 import os
 import pickle
+import shutil
 from typing import Optional
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -8,10 +9,47 @@ from langchain_upstage import UpstageEmbeddings
 from langchain_chroma import Chroma
 from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import EnsembleRetriever
+import boto3
+
 load_dotenv()
 
-VECTORSTORE_DIR = "./vectorstore"
+S3_BUCKET        = os.getenv("S3_BUCKET",        "esg-agent-bucket")
+S3_OUTPUT_PREFIX = os.getenv("S3_OUTPUT_PREFIX", "vectorstore/")
+AWS_REGION       = os.getenv("AWS_REGION",       "ap-northeast-2")
+
+BASE_DIR        = os.path.dirname(os.path.abspath(__file__))
+VECTORSTORE_DIR = os.path.join(BASE_DIR, "vectorstore")
 BM25_CACHE_FILE = os.path.join(VECTORSTORE_DIR, "bm25_docs.pkl")
+
+
+def _download_vectorstore_from_s3():
+    """S3의 vectorstore/ 를 로컬에 동기화"""
+    if os.path.exists(VECTORSTORE_DIR):
+        shutil.rmtree(VECTORSTORE_DIR)
+    os.makedirs(VECTORSTORE_DIR, exist_ok=True)
+
+    s3 = boto3.client(
+        "s3",
+        region_name=AWS_REGION,
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+    )
+
+    paginator = s3.get_paginator("list_objects_v2")
+    pages = paginator.paginate(Bucket=S3_BUCKET, Prefix=S3_OUTPUT_PREFIX)
+
+    downloaded_count = 0
+    for page in pages:
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            relative = os.path.relpath(key, S3_OUTPUT_PREFIX)
+            local_path = os.path.join(VECTORSTORE_DIR, relative)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            s3.download_file(S3_BUCKET, key, local_path)
+            downloaded_count += 1
+
+    return downloaded_count
+
 
 _db_ready = False
 vectorstore = None
@@ -19,13 +57,21 @@ docs = []
 bm25_retriever = None
 
 try:
+    print("☁️  S3에서 벡터 DB 다운로드 중...")
+    count = _download_vectorstore_from_s3()
+    print(f"✅ {count}개 파일 다운로드 완료")
+
     embeddings = UpstageEmbeddings(model="solar-embedding-1-large-passage")
     vectorstore = Chroma(persist_directory=VECTORSTORE_DIR, embedding_function=embeddings)
+
     with open(BM25_CACHE_FILE, "rb") as f:
         docs = pickle.load(f)
+
     bm25_retriever = BM25Retriever.from_documents(docs)
     bm25_retriever.k = 5
     _db_ready = True
+    print("✅ RAG DB 로드 완료")
+
 except Exception as e:
     print(f"⚠️ RAG DB 로드 실패: {e}\ningest.py를 먼저 실행해주세요.")
 
@@ -99,7 +145,6 @@ def search_pdf_tool(
         )
         return ensemble.invoke(query)
 
-    # 폴백: 3개 필터 → doc_category 제거 → company만 → 필터 없음
     attempts = [
         (year, company, doc_category),
         (year, company, None),
