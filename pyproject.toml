@@ -10,6 +10,15 @@ dependencies = [
     "langgraph>=0.3.0",
     "gradio>=5.0.0",
     "python-dotenv>=1.0.0",
-    "langchain-tavily>=0.1.0",
-    "langgraph-cli[inmem]>=0.4.21",
+    "langchain-upstage>=0.7.7",
+    "langchain-chroma>=1.1.0",
+    "langchain-community>=0.4.1",
+    "langchain-text-splitters>=1.1.1",
+    "pydantic>=2.12.5",
+    "opendataloader-pdf>=2.2.1",
+    "langchain-opendataloader-pdf>=2.0.0",
+    "pdfplumber>=0.11.9",
+    "rank-bm25>=0.2.2",   # ← BM25Retriever 의존성
+    "chromadb>=0.6.0",    # ← Chroma 벡터 DB 의존성
+    "langchain-classic>=1.0.2",
 ]
