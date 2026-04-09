@@ -21,4 +21,5 @@ dependencies = [
     "rank-bm25>=0.2.2",   # ← BM25Retriever 의존성
     "chromadb>=0.6.0",    # ← Chroma 벡터 DB 의존성
     "langchain-classic>=1.0.2",
+    "langchain-tavily>=0.2.17",
 ]
