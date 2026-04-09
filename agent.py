@@ -1,8 +1,101 @@
-from graph import create_graph
+import pickle
+import os
+from collections import defaultdict
+from langchain_upstage import ChatUpstage
+from langgraph.prebuilt import create_react_agent
+from tools import tools
 
-agent = create_graph()
+VECTORSTORE_DIR = "./vectorstore"
+BM25_CACHE_FILE = os.path.join(VECTORSTORE_DIR, "bm25_docs.pkl")
 
 
-def run(user_message: str) -> str:
-    result = agent.invoke({"query": user_message})
-    return result["answer"]
+def build_system_prompt() -> str:
+    """
+    BM25 캐시에서 메타데이터를 읽어 보유 문서 목록을 자동 생성합니다.
+    파일이 추가/삭제되어도 ingest.py 재실행 후 자동으로 반영됩니다.
+    """
+    base_prompt = """당신은 ESG 공시 전문 가이드 에이전트입니다.
+기업의 ESG(환경·사회·지배구조) 공시 관련 질문에 답변하고, 보고서 작성을 지원합니다.
+
+## 보유 데이터베이스
+search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
+
+{doc_list}
+
+[doc_category 파라미터] — 파일명의 세 번째 구분자 이후를 붙인 값:
+{category_list}
+⚠️ 주의: doc_category는 위 목록에 있는 값만 사용하세요.
+
+## 답변 원칙
+1. 질문에 특정 기업·연도·문서 유형이 언급되면 해당 필터를 사용해 검색하세요.
+2. 검색 결과가 없으면 필터를 하나씩 제거하며 재검색하세요 (좁은 범위 → 넓은 범위).
+3. 탄소 배출량 계산 등 수치가 필요한 경우, 계산 과정을 단계별로 명확히 보여주세요.
+4. 출처(기업명, 연도, 문서 유형)를 답변에 항상 포함하세요.
+5. 가이드라인과 실제 기업 사례를 함께 제시하면 더욱 유용한 답변이 됩니다."""
+
+    try:
+        with open(BM25_CACHE_FILE, "rb") as f:
+            docs = pickle.load(f)
+
+        # 메타데이터 수집: {company: {year: set(doc_category)}}
+        tree = defaultdict(lambda: defaultdict(set))
+        for doc in docs:
+            meta = doc.metadata
+            company = meta.get('company', '알수없음')
+            year = meta.get('year', '?')
+            category = meta.get('doc_category', '문서')
+            tree[company][year].add(category)
+
+        # 공통 가이드라인과 기업 보고서 분리
+        common_lines = []
+        company_lines = []
+        all_categories = set()
+
+        for company, years in sorted(tree.items()):
+            for year, categories in sorted(years.items()):
+                all_categories.update(categories)
+                cats = ', '.join(sorted(categories))
+                if company == '공통':
+                    common_lines.append(f"  - ({year}) {cats}")
+                else:
+                    company_lines.append(f"  - {company}: {cats} ({year})")
+
+        doc_list = ""
+        if company_lines:
+            doc_list += "[기업 보고서]\n" + "\n".join(company_lines)
+        if common_lines:
+            doc_list += "\n\n[공통 가이드라인] company='공통'으로 검색:\n" + "\n".join(common_lines)
+
+        category_list = "\n".join(f"  - '{c}'" for c in sorted(all_categories))
+
+        return base_prompt.format(
+            doc_list=doc_list,
+            category_list=category_list
+        )
+
+    except Exception:
+        # BM25 캐시가 없을 경우 (ingest.py 미실행 상태) 기본 프롬프트 반환
+        return base_prompt.format(
+            doc_list="  (데이터베이스 미초기화 — ingest.py를 먼저 실행하세요)",
+            category_list="  (데이터베이스 미초기화)"
+        )
+
+
+llm = ChatUpstage(model="solar-pro", temperature=0)
+
+agent = create_react_agent(
+    model=llm,
+    tools=tools,
+    prompt=build_system_prompt(),
+)
+
+
+def run(messages: list) -> str:
+    try:
+        result = agent.invoke(
+            {"messages": messages},
+            config={"recursion_limit": 10},
+        )
+        return result["messages"][-1].content
+    except Exception as e:
+        return f"⚠️ 에이전트 실행 중 오류가 발생했습니다: {str(e)}"
