@@ -13,6 +13,7 @@ from .employee_kpi_calculate import (
     calculate_disability_ratio_tool,
     calculate_employment_type_ratio_tool,
 )
+from .search_csv import search_emission_factor
 
 # 에이전트가 인식할 도구 리스트 정의
 tools = [
@@ -25,7 +26,8 @@ tools = [
     calculate_gender_ratio_tool, 
     calculate_age_ratio_tool, 
     calculate_disability_ratio_tool, 
-    calculate_employment_type_ratio_tool
+    calculate_employment_type_ratio_tool,
+    search_emission_factor,
 ]
 
 # 패키지 외부 노출 설정
