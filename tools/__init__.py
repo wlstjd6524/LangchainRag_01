@@ -14,20 +14,22 @@ from .employee_kpi_calculate import (
     calculate_employment_type_ratio_tool,
 )
 from .search_csv import search_emission_factor
+from .report_generator import generate_report
 
 # 에이전트가 인식할 도구 리스트 정의
 tools = [
-    calculate_carbon_emission, 
-    search_pdf_tool, 
-    web_search_esg, 
+    calculate_carbon_emission,
+    search_pdf_tool,
+    web_search_esg,
     analyze_water_resource_circulation,
-    calculate_safety, 
-    load_csv_data, 
-    calculate_gender_ratio_tool, 
-    calculate_age_ratio_tool, 
-    calculate_disability_ratio_tool, 
+    calculate_safety,
+    load_csv_data,
+    calculate_gender_ratio_tool,
+    calculate_age_ratio_tool,
+    calculate_disability_ratio_tool,
     calculate_employment_type_ratio_tool,
     search_emission_factor,
+    generate_report,
 ]
 
 # 패키지 외부 노출 설정
