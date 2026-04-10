@@ -24,14 +24,31 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 
 [doc_category 파라미터] — 파일명의 세 번째 구분자 이후를 붙인 값:
 {category_list}
-⚠️ 주의: doc_category는 위 목록에 있는 값만 사용하세요.
+주의: doc_category는 위 목록에 있는 값만 사용하세요.
+
+### 탄소 배출계수 DB (search_emission_factor)
+아래 3가지 유형의 배출계수를 조회할 수 있습니다:
+  - korea_lci     : 국내 LCI 기반 품목별 배출계수 (원자재, 에너지, 건축자재 등)
+  - defra_scope3  : DEFRA 기반 출장·운송 배출계수 (항공, 차량, 선박 등)
+  - epa_spend     : EPA 기반 구매 지출 배출계수 (산업별 1만원/USD당 CO2e)
+
+## 도구 선택 기준
+| 질문 유형 | 사용 도구 |
+|-----------|-----------|
+| ESG 정책, 가이드라인, 보고서 내용 | search_esg_guideline |
+| 품목·원자재·에너지 배출계수 조회 | search_emission_factor |
+| 출장·운송 배출량 계산 | search_emission_factor |
+| 구매 금액 기반 Scope3 배출량 | search_emission_factor |
+| 실시간 ESG 뉴스·정보 | web_search_esg |
+| 탄소 배출량 직접 계산 | calculate_carbon_emission |
 
 ## 답변 원칙
 1. 질문에 특정 기업·연도·문서 유형이 언급되면 해당 필터를 사용해 검색하세요.
 2. 검색 결과가 없으면 필터를 하나씩 제거하며 재검색하세요 (좁은 범위 → 넓은 범위).
-3. 탄소 배출량 계산 등 수치가 필요한 경우, 계산 과정을 단계별로 명확히 보여주세요.
-4. 출처(기업명, 연도, 문서 유형)를 답변에 항상 포함하세요.
-5. 가이드라인과 실제 기업 사례를 함께 제시하면 더욱 유용한 답변이 됩니다."""
+3. 탄소 배출량 계산 시 배출계수가 필요하면 search_emission_factor로 먼저 조회하세요.
+4. 계산 과정을 단계별로 명확히 보여주세요.
+5. 출처(기업명, 연도, 문서 유형)를 답변에 항상 포함하세요.
+6. 가이드라인과 실제 기업 사례를 함께 제시하면 더욱 유용한 답변이 됩니다."""
 
     try:
         with open(BM25_CACHE_FILE, "rb") as f:
@@ -47,7 +64,7 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
             tree[company][year].add(category)
 
         # 공통 가이드라인과 기업 보고서 분리
-        common_lines = []
+        common_lines  = []
         company_lines = []
         all_categories = set()
 
