@@ -31,7 +31,7 @@ demo = gr.ChatInterface(
     title="🌱 ESG 공시 가이드 에이전트",
     description="ESG 공시 관련 질문을 입력하세요. 가이드라인 검색, 보고서 초안 작성 등을 도와드립니다.",
     additional_inputs=[
-        gr.File(label="CSV 파일 업로드", file_types=[".csv"]),
+        gr.File(label="CSV 파일 업로드", file_types=[".csv", ".pdf"]),
     ],
     examples=[
         ["전력을 500kWh 사용했을 때 탄소 배출량은?", None],
