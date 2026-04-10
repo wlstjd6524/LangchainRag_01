@@ -1,7 +1,7 @@
 # ESG 평가 도구 모음
 # 각 팀원이 개발한 툴을 이 파일에 import해서 tools 리스트에 추가하세요.
 
-from .calculate_demo import calculate_carbon_emission
+from .calculate_carbon import calculate_carbon_emission
 from .search_pdf import search_pdf_tool
 from .web_search import web_search_esg
 from .water_recycling import analyze_water_resource_circulation
