@@ -7,12 +7,7 @@ from .web_search import web_search_esg
 from .water_recycling import analyze_water_resource_circulation
 from .calculate_safety import calculate_safety
 from .csv_loader import load_csv_data
-from .employee_kpi_calculate import (
-    calculate_gender_ratio_tool,
-    calculate_age_ratio_tool,
-    calculate_disability_ratio_tool,
-    calculate_employment_type_ratio_tool,
-)
+from .calculate_employee_kpi import calculate_employee_kpi
 from .search_csv import search_emission_factor
 from .report_generator import generate_report
 
@@ -24,10 +19,7 @@ tools = [
     analyze_water_resource_circulation,
     calculate_safety,
     load_csv_data,
-    calculate_gender_ratio_tool,
-    calculate_age_ratio_tool,
-    calculate_disability_ratio_tool,
-    calculate_employment_type_ratio_tool,
+    calculate_employee_kpi,
     search_emission_factor,
     generate_report,
 ]

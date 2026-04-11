@@ -45,6 +45,28 @@ COLUMN_ALIASES: dict[str, list[str]] = {
         "전력사용량(kwh)", "전력(kwh)", "전기(kwh)",
         "electricity", "kwh", "kWh",
     ],
+    # ── calculate_employee_kpi ─────────────
+    "gender": [
+        "gender", "성별",
+    ],
+    "age": [
+        "age", "나이", "연령",
+    ],
+    "employment_type": [
+        "employment_type", "고용형태", "고용 형태",
+    ],
+    "position_level": [
+        "position_level", "직급", "직책",
+    ],
+    "is_board_member": [
+        "is_board_member", "이사회", "이사회여부",
+    ],
+    "is_disabled": [
+        "is_disabled", "장애인여부", "장애인",
+    ],
+    "is_severe_disabled": [
+        "is_severe_disabled", "중증장애인여부", "중증장애인",
+    ],
 }
 
 
@@ -125,16 +147,23 @@ def load_csv_data(file_path: str) -> str:
             "COLUMN_ALIASES에 해당 컬럼명을 추가하거나 CSV 헤더를 확인하세요."
         )
 
+    # bool로 처리할 표준 컬럼명 집합
+    BOOL_COLUMNS = {"is_board_member", "is_disabled", "is_severe_disabled"}
+
     standardized_rows: list[dict] = []
     for row in rows:
         std_row: dict = {}
         for orig_col, std_col in col_mapping.items():
             val = row.get(orig_col, "").strip()
             if val:
-                try:
-                    std_row[std_col] = float(val.replace(",", ""))
-                except ValueError:
-                    std_row[std_col] = val
+                # Ture/Yes/Y -> True, 나머지 ->False로 변환
+                if std_col in BOOL_COLUMNS:
+                    std_row[std_col] = val.lower() in ("True", "Yes", "Y")
+                else:
+                    try:
+                        std_row[std_col] = float(val.replace(",", ""))
+                    except ValueError:
+                        std_row[std_col] = val
         if std_row:
             standardized_rows.append(std_row)
 
