@@ -156,9 +156,9 @@ def load_csv_data(file_path: str) -> str:
         for orig_col, std_col in col_mapping.items():
             val = row.get(orig_col, "").strip()
             if val:
-                # Ture/Yes/Y -> True, 나머지 ->False로 변환
+                # Ture/1 -> True, 나머지 ->False로 변환
                 if std_col in BOOL_COLUMNS:
-                    std_row[std_col] = val.lower() in ("True", "Yes", "Y")
+                    std_row[std_col] = val.lower() in ("True", "1")
                 else:
                     try:
                         std_row[std_col] = float(val.replace(",", ""))
