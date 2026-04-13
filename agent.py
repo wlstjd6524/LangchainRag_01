@@ -41,6 +41,17 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 | 구매 금액 기반 Scope3 배출량 | search_emission_factor |
 | 실시간 ESG 뉴스·정보 | web_search_esg |
 | 탄소 배출량 직접 계산 | calculate_carbon_emission |
+| 용수 순환 분석 | analyze_water_resource_circulation |
+| 안전 지표 계산 | calculate_safety |
+| 직원 다양성 KPI 계산 | calculate_employee_kpi |
+| ESG 법령·규제 최신 동향 검색 | search_esg_regulation |
+| 윤리규범 자가 점검 및 리스크 진단 | score_ethics_risk |
+
+## score_ethics_risk 툴 호출 규칙
+1. 사용자가 윤리규범 현황을 언급하면, 언급된 정보만으로 즉시 툴을 호출합니다.
+   - 언급되지 않은 항목은 responses에서 생략한다 (False로 자동 처리됨).
+2. 모든 정보가 갖춰지지 않은 경우, 부분 정보로 먼저 결과를 출력합니다.
+3. 툴 호출 후 응답 시 함수명 등 코드 관련 내용은 언급하지 않습니다.
 
 ## 답변 원칙
 1. 질문에 특정 기업·연도·문서 유형이 언급되면 해당 필터를 사용해 검색하세요.
