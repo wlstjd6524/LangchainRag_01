@@ -7,6 +7,12 @@ from langgraph.prebuilt import create_react_agent
 from tools import tools
 from middleware.logger import LoggingCallbackHandler, log_request, log_response
 
+# Router 에 필요한 
+from typing import Literal
+from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
+from langgraph.graph import StateGraph, START, END, MessagesState
+
 VECTORSTORE_DIR = "./vectorstore"
 BM25_CACHE_FILE = os.path.join(VECTORSTORE_DIR, "bm25_docs.pkl")
 
@@ -62,6 +68,7 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 4. 계산 과정을 단계별로 명확히 보여주세요.
 5. 출처(기업명, 연도, 문서 유형)를 답변에 항상 포함하세요.
 6. 가이드라인과 실제 기업 사례를 함께 제시하면 더욱 유용한 답변이 됩니다.
+7. search_emission_factor 도구 사용 시, 사용자가 입력한 **'정확한 품목명 전체(예: 1종 포틀랜드 시멘트)'*를 그대로 검색어(Query)로 사용하세요. 대충 요약해서 검색하지 마세요.
 
 ## 특별 주의 사항 (강제 룰)
 1. [다중 항목 계산] 질문에 계산해야 할 항목이 여러 개(예: 항공 출장 + 호텔 숙박)라면, 절대로 한 번에 암산하지 마세요. 반드시 각 항목별로 `search_emission_factor`와 `calculate_carbon_emission`을 개별적으로 순차 호출한 뒤, 마지막에 결과값을 합산하세요.
@@ -122,24 +129,97 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 
 llm = ChatUpstage(model="solar-pro", temperature=0)
 
-agent = create_react_agent(
+esg_agent = create_react_agent(
     model=llm,
     tools=tools,
     prompt=build_system_prompt(),
 )
 
+# Router Agent 영역
+
+# ==========================================
+# 1. 일상 대화(ChitChat) Node
+# ==========================================
+def chitchat_node(state: MessagesState):
+    prompt = "당신은 ESG 공시 가이드 AI입니다. 사용자에게 친절하고 간결하게 인사하거나 대답해주세요. 도구(Tool)를 쓸 필요는 없습니다."
+    response = llm.invoke([{"role": "system", "content": prompt}] + state["messages"])
+    return {"messages": [response]}
+
+
+# ==========================================
+# 2. 라우터(의도를 분류하는 로직)
+# ==========================================
+class RouteQuery(BaseModel):
+    destination: Literal["chitchat", "esg_task"] = Field(
+        description="일상 대화면 'chitchat', 전문 작업(데이터 검색, 계산 등) 이면 'esg_task'를 선택하세요."
+    )
+
+router_prompt = ChatPromptTemplate.from_messages([
+    ("system", """당신은 팀의 통합 AI 파이프라인 최상위 트래픽 라우터입니다.
+사용자의 질문 의도를 분석하여 가장 적절한 경로로 연결하세요.
+
+[분류 기준]
+1. chitchat: "안녕", "고마워", "넌 누구야" 등 도구 호출이 전혀 필요 없는 단순 인사나 일상 대화.
+2. esg_task: 기업 ESG 가이드라인 검색, 탄소/수자원 계산, 관련 뉴스 검색 등 팀원들이 구축한 데이터베이스나 도구(Tool)를 활용해야 하는 모든 전문적인 질문.
+"""),
+    ("user", "{question}")
+])
+
+router_chain = router_prompt | llm.with_structured_output(RouteQuery)
+
+
+def route_question(state: MessagesState):
+    '''
+    사용자 질문을 분석해 다음 목적지로 반환
+    '''
+    question = state["messages"][-1].content
+    print(f"[Router] 질문 의도 분석 : '{question}'")
+
+    decision = router_chain.invoke({"question": question})
+    print(f"분류 결과 : [{decision.destination}] 노드로 이동합니다.\n")
+
+    return decision.destination
+
+
+# ==========================================
+# 3. 최상위 Supervisior 그래프 조립
+# ==========================================
+builder = StateGraph(MessagesState)
+
+# 노드 추가 (기존에 만든 agent 를 esg_task 라는 이름으로 그대로 재투입)
+builder.add_node("chitchat", chitchat_node)
+builder.add_node("esg_task", esg_agent)
+
+# 시작점에서 라우터(route_question) 로 분기 설정
+builder.add_conditional_edges(START, route_question)
+
+# 각 작업 끝나면 프로세스 종료
+builder.add_edge("chitchat", END)
+builder.add_edge("esg_task", END)
+
+master_agent = builder.compile()
+
 
 def run(messages: list) -> str:
     log_request(str(messages[-1].content) if messages else "")
+
     callback = LoggingCallbackHandler()
     start = time.time()
+
     try:
-        result = agent.invoke(
+        # 기존에 쓰던 agent.invoke -> master_agent.invoke 사용, 수정완료
+        result = master_agent.invoke(
             {"messages": messages},
-            config={"recursion_limit": 10, "callbacks": [callback]},
+            # 라우터가 생겨서 limit 값 10 -> 15 로 변경
+            config={
+                "recursion_limit": 15,
+                "callbacks": [callback]
+                },
         )
         response = result["messages"][-1].content
+
         log_response(response, time.time() - start, callback.tool_call_count)
+        
         return response
     except Exception as e:
         return f"⚠️ 에이전트 실행 중 오류가 발생했습니다: {str(e)}"
