@@ -1,9 +1,11 @@
 import pickle
 import os
+import time
 from collections import defaultdict
 from langchain_upstage import ChatUpstage
 from langgraph.prebuilt import create_react_agent
 from tools import tools
+from middleware.logger import LoggingCallbackHandler, log_request, log_response
 
 # Router 에 필요한 
 from typing import Literal
@@ -47,6 +49,17 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 | 구매 금액 기반 Scope3 배출량 | search_emission_factor |
 | 실시간 ESG 뉴스·정보 | web_search_esg |
 | 탄소 배출량 직접 계산 | calculate_carbon_emission |
+| 용수 순환 분석 | analyze_water_resource_circulation |
+| 안전 지표 계산 | calculate_safety |
+| 직원 다양성 KPI 계산 | calculate_employee_kpi |
+| ESG 법령·규제 최신 동향 검색 | search_esg_regulation |
+| 윤리규범 자가 점검 및 리스크 진단 | score_ethics_risk |
+
+## score_ethics_risk 툴 호출 규칙
+1. 사용자가 윤리규범 현황을 언급하면, 언급된 정보만으로 즉시 툴을 호출합니다.
+   - 언급되지 않은 항목은 responses에서 생략한다 (False로 자동 처리됨).
+2. 모든 정보가 갖춰지지 않은 경우, 부분 정보로 먼저 결과를 출력합니다.
+3. 툴 호출 후 응답 시 함수명 등 코드 관련 내용은 언급하지 않습니다.
 
 ## 답변 원칙
 1. 질문에 특정 기업·연도·문서 유형이 언급되면 해당 필터를 사용해 검색하세요.
@@ -61,7 +74,9 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 1. [다중 항목 계산] 질문에 계산해야 할 항목이 여러 개(예: 항공 출장 + 호텔 숙박)라면, 절대로 한 번에 암산하지 마세요. 반드시 각 항목별로 `search_emission_factor`와 `calculate_carbon_emission`을 개별적으로 순차 호출한 뒤, 마지막에 결과값을 합산하세요.
 2. [Scope 분류] 출장, 숙박, 교통수단 이용 등은 반드시 '간접 배출(Scope3)'로 명시하세요.
 3. [결과물 포맷] 마크다운 형식을 사용하여 표, 볼드체, 리스트 등으로 중소기업 담당자도 이해하기 쉽게 작성하세요.
-4. [실시간 환율 연동] 구매 지출 기반(epa_spend) 배출량을 원화(KRW)로 계산할 경우, 반드시 `web_search_esg` 도구를 사용해 오늘의 실시간 USD/KRW 환율을 검색하세요. 검색된 환율로 원화 지출액을 USD로 변환한 뒤, DB의 '탄소배출계수(kg CO2e/USD)'를 적용하여 계산하세요. 
+4. [실시간 환율 연동] 구매 지출 기반(epa_spend) 배출량을 원화(KRW)로 계산할 경우, 반드시 `web_search_esg` 도구를 사용해 오늘의 실시간 USD/KRW 환율을 검색하세요. 검색된 환율로 원화 지출액을 USD로 변환한 뒤, DB의 '탄소배출계수(kg CO2e/USD)'를 적용하여 계산하세요.
+5. [답변 형식] 사용한 도구 이름, 재검색 안내, 내부 동작 과정은 절대 답변에 포함하지 마세요. 사용자는 도구의 존재를 알 필요가 없습니다.
+6. [ESG 가이드라인·보고서 질문] ESG 가이드라인, 기업 보고서, 공시 항목 관련 질문은 반드시 search_esg_guideline 툴을 호출하세요. 적합한 문서가 없을 데이터베이스에 없을 경우 자체 지식 말고 검색해서 답변할지 사용자에게 제안하세요.
 """
 
     try:
@@ -186,13 +201,25 @@ master_agent = builder.compile()
 
 
 def run(messages: list) -> str:
+    log_request(str(messages[-1].content) if messages else "")
+
+    callback = LoggingCallbackHandler()
+    start = time.time()
+
     try:
         # 기존에 쓰던 agent.invoke -> master_agent.invoke 사용
         result = master_agent.invoke(
             {"messages": messages},
             # 라우터가 생겨서 limit 값 10 -> 15 로 변경
-            config={"recursion_limit": 15},
+            config={
+                "recursion_limit": 15,
+                "callbacks": [callback]
+                },
         )
-        return result["messages"][-1].content
+        response = result["messages"][-1].content
+
+        log_response(response, time.time() - start, callback.tool_call_count)
+        
+        return response
     except Exception as e:
         return f"⚠️ 에이전트 실행 중 오류가 발생했습니다: {str(e)}"

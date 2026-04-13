@@ -68,6 +68,8 @@ def _build_docx(title: str, content: str) -> Document:
 def generate_report(title: str, content: str) -> str:
     """
     사용자가 분석 결과나 답변을 보고서로 저장하고 싶을 때 호출한다.
+    사용자가 "보고서로 저장해줘", "파일로 만들어줘", "Word로 저장해줘"라고 명시적으로 보고서 저장을 요청할 때만 호출한다.
+    분석 또는 점검 결과, 검색 결과가 나왔다고 해서 이 툴을 자동으로 호출하지 않는다.
     ESG 분석 결과, 계산 결과, 가이드라인 요약 등을 Word 파일로 저장한다.
     이 툴은 반드시 1회만 호출하며, 모든 내용을 content에 담아 한 번에 저장한다.
 

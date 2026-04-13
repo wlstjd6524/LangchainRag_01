@@ -6,8 +6,10 @@ from .search_pdf import search_pdf_tool
 from .web_search import web_search_esg
 from .water_recycling import analyze_water_resource_circulation
 from .calculate_safety import calculate_safety
-from .csv_loader import load_csv_data
 from .calculate_employee_kpi import calculate_employee_kpi
+from .search_esg_regulation import search_esg_regulation
+from .score_ethics_risk import score_ethics_risk
+from .csv_loader import load_csv_data
 from .search_csv import search_emission_factor
 from .report_generator import generate_report
 
@@ -18,8 +20,10 @@ tools = [
     web_search_esg,
     analyze_water_resource_circulation,
     calculate_safety,
-    load_csv_data,
     calculate_employee_kpi,
+    search_esg_regulation,
+    score_ethics_risk,
+    load_csv_data,
     search_emission_factor,
     generate_report,
 ]

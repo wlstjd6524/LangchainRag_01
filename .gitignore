@@ -39,3 +39,7 @@ vectorstore/
 vectorstore/**
 reports/
 reports/**
+
+# 로그
+logs/
+logs/**
