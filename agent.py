@@ -6,8 +6,6 @@ from langchain_upstage import ChatUpstage
 from langgraph.prebuilt import create_react_agent
 from tools import tools
 from middleware.logger import LoggingCallbackHandler, log_request, log_response
-
-# Router 에 필요한 
 from typing import Literal
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
@@ -24,6 +22,28 @@ def build_system_prompt() -> str:
     """
     base_prompt = """당신은 ESG 공시 전문 가이드 에이전트입니다.
 기업의 ESG(환경·사회·지배구조) 공시 관련 질문에 답변하고, 보고서 작성을 지원합니다.
+
+## ══════════════════════════════════════════
+## ⚠️ 최우선 규칙: 숫자 날조 절대 금지
+## ══════════════════════════════════════════
+배출계수·탄소 배출량·에너지 사용량 등 **모든 수치**는 반드시 도구를 호출하여
+데이터베이스에서 가져와야 합니다.
+
+**search_emission_factor 툴 호출 필수 조건 (아래 중 하나라도 해당하면 무조건 호출)**
+1. "배출계수", "탄소배출계수", "발생계수" 단어가 포함된 질문
+2. 특정 연료·에너지·원자재·화학물질·폐기물 사용량이 언급되고 탄소/배출/계산이 요청된 질문
+   예시: "LNG 5,000m3 사용했어, 탄소 배출량은?", "경유 100L 사용 시 배출량", "전기 15,000kWh 사용"
+3. 에너지원 이름(LNG, LPG, 경유, 휘발유, 도시가스, 등유, 전기, 석탄 등)이 언급된 질문
+4. 원자재·건축자재·화학물질 이름이 언급된 질문
+5. 폐기물 처리(매립, 소각, 재활용) 관련 질문
+6. 출장·운송(항공, 차량, 선박) 탄소 관련 질문
+7. 구매 금액 기반 Scope3 배출량 질문
+
+**처리 규칙 (절대 위반 금지)**
+1. 위 조건 중 하나라도 해당하면 search_emission_factor를 먼저 호출하세요.
+2. 툴을 호출하지 않고 배출계수 숫자를 직접 답변하는 것은 엄격히 금지입니다.
+3. 툴 결과에 있는 숫자를 그대로 사용하세요. 수정하거나 추가 계수를 덧붙이지 마세요.
+4. 툴이 "찾을 수 없다"고 반환하면, 추측값 없이 그대로 사용자에게 전달하세요.
 
 ## 보유 데이터베이스
 search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
@@ -68,7 +88,7 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 4. 계산 과정을 단계별로 명확히 보여주세요.
 5. 출처(기업명, 연도, 문서 유형)를 답변에 항상 포함하세요.
 6. 가이드라인과 실제 기업 사례를 함께 제시하면 더욱 유용한 답변이 됩니다.
-7. search_emission_factor 도구 사용 시, 사용자가 입력한 **'정확한 품목명 전체(예: 1종 포틀랜드 시멘트)'*를 그대로 검색어(Query)로 사용하세요. 대충 요약해서 검색하지 마세요.
+7. search_emission_factor 도구 사용 시, 사용자가 입력한 **'정확한 품목명 전체(예: 1종 포틀랜드 시멘트)'**를 그대로 검색어(Query)로 사용하세요. 대충 요약해서 검색하지 마세요.
 
 ## 특별 주의 사항 (강제 룰)
 1. [다중 항목 계산] 질문에 계산해야 할 항목이 여러 개(예: 항공 출장 + 호텔 숙박)라면, 절대로 한 번에 암산하지 마세요. 반드시 각 항목별로 `search_emission_factor`와 `calculate_carbon_emission`을 개별적으로 순차 호출한 뒤, 마지막에 결과값을 합산하세요.
@@ -120,7 +140,6 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
         )
 
     except Exception:
-        # BM25 캐시가 없을 경우 (ingest.py 미실행 상태) 기본 프롬프트 반환
         return base_prompt.format(
             doc_list="  (데이터베이스 미초기화 — ingest.py를 먼저 실행하세요)",
             category_list="  (데이터베이스 미초기화)"
@@ -135,20 +154,13 @@ esg_agent = create_react_agent(
     prompt=build_system_prompt(),
 )
 
-# Router Agent 영역
-
-# ==========================================
-# 1. 일상 대화(ChitChat) Node
-# ==========================================
+# Router Agent
 def chitchat_node(state: MessagesState):
     prompt = "당신은 ESG 공시 가이드 AI입니다. 사용자에게 친절하고 간결하게 인사하거나 대답해주세요. 도구(Tool)를 쓸 필요는 없습니다."
     response = llm.invoke([{"role": "system", "content": prompt}] + state["messages"])
     return {"messages": [response]}
 
 
-# ==========================================
-# 2. 라우터(의도를 분류하는 로직)
-# ==========================================
 class RouteQuery(BaseModel):
     destination: Literal["chitchat", "esg_task"] = Field(
         description="일상 대화면 'chitchat', 전문 작업(데이터 검색, 계산 등) 이면 'esg_task'를 선택하세요."
@@ -169,31 +181,17 @@ router_chain = router_prompt | llm.with_structured_output(RouteQuery)
 
 
 def route_question(state: MessagesState):
-    '''
-    사용자 질문을 분석해 다음 목적지로 반환
-    '''
     question = state["messages"][-1].content
     print(f"[Router] 질문 의도 분석 : '{question}'")
-
     decision = router_chain.invoke({"question": question})
     print(f"분류 결과 : [{decision.destination}] 노드로 이동합니다.\n")
-
     return decision.destination
 
 
-# ==========================================
-# 3. 최상위 Supervisior 그래프 조립
-# ==========================================
 builder = StateGraph(MessagesState)
-
-# 노드 추가 (기존에 만든 agent 를 esg_task 라는 이름으로 그대로 재투입)
 builder.add_node("chitchat", chitchat_node)
 builder.add_node("esg_task", esg_agent)
-
-# 시작점에서 라우터(route_question) 로 분기 설정
 builder.add_conditional_edges(START, route_question)
-
-# 각 작업 끝나면 프로세스 종료
 builder.add_edge("chitchat", END)
 builder.add_edge("esg_task", END)
 
@@ -207,19 +205,15 @@ def run(messages: list) -> str:
     start = time.time()
 
     try:
-        # 기존에 쓰던 agent.invoke -> master_agent.invoke 사용, 수정완료
         result = master_agent.invoke(
             {"messages": messages},
-            # 라우터가 생겨서 limit 값 10 -> 15 로 변경
             config={
                 "recursion_limit": 15,
                 "callbacks": [callback]
-                },
+            },
         )
         response = result["messages"][-1].content
-
         log_response(response, time.time() - start, callback.tool_call_count)
-        
         return response
     except Exception as e:
         return f"⚠️ 에이전트 실행 중 오류가 발생했습니다: {str(e)}"
