@@ -207,7 +207,7 @@ def run(messages: list) -> str:
     start = time.time()
 
     try:
-        # 기존에 쓰던 agent.invoke -> master_agent.invoke 사용
+        # 기존에 쓰던 agent.invoke -> master_agent.invoke 사용, 수정완료
         result = master_agent.invoke(
             {"messages": messages},
             # 라우터가 생겨서 limit 값 10 -> 15 로 변경
