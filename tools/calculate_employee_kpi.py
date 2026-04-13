@@ -13,14 +13,13 @@ csv_loader.py의 load_csv_data()로 CSV를 파싱한 뒤,
 반환된 data 리스트를 employees 파라미터에 직접 전달합니다.
 """
 
-import json
 from langchain_core.tools import tool
 
 
 # 법령/고시 기준 상수 (RAG 연동 시 이 부분만 교체)
 CONSTANTS = {
     "disability_mandatory_rate": 3.1,   # 장애인고용촉진법 제28조 (민간기업 의무고용률)
-    "regular_industry_avg": 72.6,   # 2025 고용형태공시 정규직 전체 평균 (고용노동부)
+    "regular_industry_avg": 72.6,       # 2025 고용형태공시 정규직 전체 평균 (고용노동부)
 }
 
 
@@ -182,8 +181,41 @@ def _calc_employment_type(employees: list[dict]) -> dict:
     }
 
 
+def _to_markdown(results: dict) -> str:
+    """계산 결과 dict → Markdown 문자열 (범용 재귀 변환)"""
 
-# @tool
+    METRIC_TITLE = {
+        "gender": "성별 비율 (K-ESG S-3-1 | GRI 405-1)",
+        "age": "연령대별 비율 (GRI 405-1 | 고령자고용촉진법)",
+        "disability": "장애인 고용률 (K-ESG S-3-3 | 장애인고용촉진법)",
+        "employment_type": "고용형태별 비율 (K-ESG S-2-2 | 기간제법)",
+    }
+
+    def _render(data, depth=3) -> str:
+        """dict/기타 값을 재귀적으로 Markdown으로 변환"""
+        if isinstance(data, dict):
+            lines = []
+            for k, v in data.items():
+                if isinstance(v, dict):
+                    lines.append(f"{'#' * depth} {k}\n")
+                    lines.append(_render(v, depth + 1))
+                else:
+                    lines.append(f"- **{k}:** {v}")
+            return "\n".join(lines)
+        return str(data)
+
+    sections = ["# 임직원 다양성 KPI 분석 결과\n"]
+    for metric, data in results.items():
+        title = METRIC_TITLE.get(metric, metric)
+        section = [f"## {title}\n"]
+        if isinstance(data, dict) and "error" in data:
+            section.append(f"⚠️ 오류: {data['error']}")
+        else:
+            section.append(_render(data))
+        sections.append("\n".join(section))
+
+    return "\n\n---\n\n".join(sections)
+
 _METRIC_MAP = {
     "gender": _calc_gender,
     "age": _calc_age,
@@ -209,7 +241,7 @@ def calculate_employee_kpi(employees: list[dict], metrics: list[str]) -> str:
             - "employment_type": 고용형태별 비율 및 K-ESG S-2-2 점수
 
     Returns:
-        요청된 지표의 계산 결과 JSON 문자열
+        요청된 지표의 계산 결과 마크다운 문자열
     """
     print("##### EMPLOYEE KPI TOOL #####")
     print(f"##### metrics: {metrics} #####")
@@ -228,4 +260,4 @@ def calculate_employee_kpi(employees: list[dict], metrics: list[str]) -> str:
         except Exception as e:
             results[metric] = {"error": str(e)}
 
-    return json.dumps(results, ensure_ascii=False, indent=2)
+    return _to_markdown(results)
