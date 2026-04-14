@@ -63,7 +63,7 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 ## 도구 선택 기준
 | 질문 유형 | 사용 도구 |
 |-----------|-----------|
-| ESG 정책, 가이드라인, 보고서 내용 | search_esg_guideline |
+| ESG 정책, 가이드라인, 보고서 내용, 침해사고 대응 매뉴얼, 보안 인증제도 절차 및 수수료 검색 | search_esg_guideline |
 | 품목·원자재·에너지 배출계수 조회 | search_emission_factor |
 | 출장·운송 배출량 계산 | search_emission_factor |
 | 구매 금액 기반 Scope3 배출량 | search_emission_factor |
@@ -74,6 +74,7 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 | 직원 다양성 KPI 계산 | calculate_employee_kpi |
 | ESG 법령·규제 최신 동향 검색 | search_esg_regulation |
 | 윤리규범 자가 점검 및 리스크 진단 | score_ethics_risk |
+| 기업 보안 정책 진단 및 인증 기준(ISMS-P, ISO27001) 누락 항목 분석 | analyze_security_compliance_gap |
 
 ## score_ethics_risk 툴 호출 규칙
 1. 사용자가 윤리규범 현황을 언급하면, 언급된 정보만으로 즉시 툴을 호출합니다.
