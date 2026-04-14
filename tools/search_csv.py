@@ -1,16 +1,19 @@
 import os
+import re
 import boto3
 from functools import lru_cache
 from dotenv import load_dotenv
 from langchain_core.tools import tool
+from langchain_core.messages import AIMessage
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.utilities import SQLDatabase
-from langchain_community.agent_toolkits import create_sql_agent
 from langchain_upstage import ChatUpstage
+from langgraph.graph import END, START, MessagesState, StateGraph
 
 load_dotenv()
 
 S3_BUCKET    = os.getenv("S3_BUCKET",    "esg-agent-bucket")
-S3_DB_PREFIX   = os.getenv("S3_DB_PREFIX",   "db/")
+S3_DB_PREFIX = os.getenv("S3_DB_PREFIX", "db/")
 AWS_REGION   = os.getenv("AWS_REGION",   "ap-northeast-2")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,12 +21,10 @@ DB_PATH  = os.path.join(BASE_DIR, "emission_factor.db")
 
 
 def _download_db_from_s3():
-    """로컬 DB 없을 때만 S3에서 다운로드"""
     if os.path.exists(DB_PATH):
-        print("✅ 로컬 DB 캐시 사용 (S3 다운로드 스킵)")
+        print("로컬 DB 캐시 사용 (S3 다운로드 스킵)")
         return
-
-    print("☁️  로컬 DB 없음 → S3에서 다운로드 중...")
+    print("☁️ 로컬 DB 없음 → S3에서 다운로드 중...")
     s3 = boto3.client(
         "s3",
         region_name=AWS_REGION,
@@ -33,63 +34,239 @@ def _download_db_from_s3():
     s3_key = f"{S3_DB_PREFIX}emission_factor.db"
     try:
         s3.download_file(S3_BUCKET, s3_key, DB_PATH)
-        print("✅ DB 다운로드 완료")
+        print("DB 다운로드 완료")
     except Exception as e:
-        print(f"⚠️  DB 다운로드 실패: {e}\ningest_csv.py를 먼저 실행해주세요.")
+        print(f"⚠️ DB 다운로드 실패: {e}\ningest_csv.py를 먼저 실행해주세요.")
         raise
 
 
 _download_db_from_s3()
 
+GENERATE_QUERY_SYSTEM = """You are a SQLite SQL expert for a Korean carbon emission factor database.
+Output ONLY the raw SQL query. No explanation, no markdown, no backticks.
+NO DML statements (INSERT, UPDATE, DELETE, DROP).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【TABLE 1】 korea_lci  — 국내 LCI 배출계수
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Columns: 대분류, 구분, 품목명, 단위, 탄소배출계수
+
+⚠️ 대분류별 컬럼 역할이 다름 (반드시 구분할 것):
+
+[일반 대분류] 원료 및 에너지 생산 / 수송 / 폐기물 처리 / 화학반응공정
+  구분   = 카테고리 (예: '에너지', '건축자재', '소각', '매립', '육상수송')
+  품목명 = 실제 품목 (예: '경유', '전기', '폐지 소각', '유기성폐기물 소각', '트럭')
+  → 품목 검색: WHERE REPLACE(품목명,' ','') LIKE '%검색어%'
+
+[특수 대분류] 연료원별 사용  ← ★ 구분/품목명 역할이 반전됨 ★
+  구분   = 연료 종류 (실제 저장된 이름 목록):
+    'LNG(천연가스)', 'LPG(액화석유가스)', '경유', '등유', '휘발유', '나프타',
+    'B-A유', 'B-B유', 'B-C유', '항공유', '아스팔트', '윤활유', '코크스',
+    '석유코크스', '국내무연탄', '수입무연탄_연료용', '수입무연탄_원료용',
+    '연료용 유연탄(역청탄)', '원료용 유연탄(역청탄)'
+  품목명 = 사용 부문/용도 (예: '제조업 및 건설', '육상 수송', '가정', '에너지산업')
+  → 연료 검색: WHERE 대분류='연료원별 사용' AND REPLACE(구분,' ','') LIKE '%연료명%'
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ UNION ALL 필수 연료 목록 (아래 연료는 반드시 UNION ALL 사용)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+아래 연료들은 두 대분류에 모두 데이터가 존재하며, 단위와 의미가 다름.
+원료 및 에너지 생산(품목명, kg기준) ↔ 연료원별 사용(구분, L 또는 m³기준)
+
+  경유      ↔  경유            (원료생산LCI kg/kg  vs  연소 L/L)
+  등유      ↔  등유            (원료생산LCI kg/kg  vs  연소 L/L)
+  휘발유    ↔  휘발유          (원료생산LCI kg/kg  vs  연소 L/L)
+  나프타    ↔  나프타          (원료생산LCI kg/kg  vs  연소 L/L)
+  천연가스  ↔  LNG(천연가스)   (원료생산LCI kg/kg  vs  연소 m³/m³) ← 이름 다름 주의
+  액화석유가스(LPG) ↔ LPG(액화석유가스) (원료생산LCI kg/kg vs 연소 kg/kg) ← 이름 다름 주의
+
+위 연료 검색 템플릿 (반드시 이 형식 사용):
+  SELECT 대분류, 구분, 품목명, 단위, 탄소배출계수 FROM korea_lci
+  WHERE 대분류 != '연료원별 사용' AND REPLACE(품목명,' ','') LIKE '%키워드%'
+  UNION ALL
+  SELECT 대분류, 구분, 품목명, 단위, 탄소배출계수 FROM korea_lci
+  WHERE 대분류 = '연료원별 사용' AND REPLACE(구분,' ','') LIKE '%키워드%'
+
+괄호 포함 이름 검색 규칙 (OR로 키워드 분리):
+  DB에 'LNG(천연가스)', 'LPG(액화석유가스)' 처럼 괄호가 포함된 이름이 있음.
+  사용자가 'LNG' 또는 '천연가스' 어느 쪽으로 물어봐도 찾을 수 있도록
+  괄호 앞 이름과 괄호 안 이름을 OR 로 분리하여 검색:
+    REPLACE(구분,' ','') LIKE '%LNG%' OR REPLACE(구분,' ','') LIKE '%천연가스%'
+    REPLACE(구분,' ','') LIKE '%LPG%' OR REPLACE(구분,' ','') LIKE '%액화석유가스%'
+
+실용 예시:
+  Q: "LNG 배출계수" 또는 "천연가스 배출계수"  → 같은 SQL로 처리
+     SELECT 대분류, 구분, 품목명, 단위, 탄소배출계수 FROM korea_lci
+     WHERE 대분류 != '연료원별 사용'
+       AND (REPLACE(품목명,' ','') LIKE '%LNG%' OR REPLACE(품목명,' ','') LIKE '%천연가스%')
+     UNION ALL
+     SELECT 대분류, 구분, 품목명, 단위, 탄소배출계수 FROM korea_lci
+     WHERE 대분류 = '연료원별 사용'
+       AND (REPLACE(구분,' ','') LIKE '%LNG%' OR REPLACE(구분,' ','') LIKE '%천연가스%')
+
+  Q: "경유 배출계수"
+     SELECT 대분류, 구분, 품목명, 단위, 탄소배출계수 FROM korea_lci
+     WHERE 대분류 != '연료원별 사용' AND REPLACE(품목명,' ','') LIKE '%경유%'
+     UNION ALL
+     SELECT 대분류, 구분, 품목명, 단위, 탄소배출계수 FROM korea_lci
+     WHERE 대분류 = '연료원별 사용' AND REPLACE(구분,' ','') LIKE '%경유%'
+
+  Q: "폐지 소각 배출계수"  → 폐기물처리는 일반 대분류, UNION ALL 불필요
+     SELECT 구분, 품목명, 단위, 탄소배출계수 FROM korea_lci
+     WHERE REPLACE(품목명,' ','') LIKE '%폐지소각%'
+
+  Q: "트럭 운송 배출계수"  → 수송은 일반 대분류, UNION ALL 불필요
+     SELECT 구분, 품목명, 단위, 탄소배출계수 FROM korea_lci
+     WHERE 대분류='수송' AND REPLACE(품목명,' ','') LIKE '%트럭%'
+
+대분류 전체 목록: '원료 및 에너지 생산', '수송', '폐기물 처리', '연료원별 사용', '화학반응공정'
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【TABLE 2】 defra_scope3  — 해외 출장/운송 배출계수
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Columns: 카테고리(한글), 영문_대분류, 영문_소분류, 단위, 탄소배출계수
+
+카테고리(한글) 목록: '항공 출장', '육상 출장', '해운 출장', '화물 운송',
+                     '상수도(물 공급)', '하수 처리', '원자재 구매', '호텔 숙박',
+                     '전력 송배전 손실', '전기차 전력 송배전 손실', '재택근무'
+
+검색: WHERE REPLACE("카테고리(한글)",' ','') LIKE '%키워드%'
+      OR REPLACE(영문_대분류,' ','') LIKE '%keyword%'
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【TABLE 3】 epa_spend  — 지출 기반 배출계수 (Scope3)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Columns: 카테고리(한글), 영문_산업분류명,
+         "탄소배출계수(kg CO2e/1만원)", "탄소배출계수(kg CO2e/USD)"
+
+카테고리(한글) 컬럼의 99%가 영문 그대로 저장됨.
+   반드시 한글 + 영문 동시 검색:
+   WHERE REPLACE("카테고리(한글)",' ','') LIKE '%한글키워드%'
+      OR REPLACE(영문_산업분류명,' ','') LIKE '%EnglishKeyword%'
+
+컬럼명에 괄호 포함 시 큰따옴표 필수:
+   ✅ "탄소배출계수(kg CO2e/1만원)"   ❌ 탄소배출계수(kg CO2e/1만원)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【공통 규칙】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+한국어 텍스트는 DB 내 띄어쓰기가 불일치함.
+모든 한국어 검색 시 REPLACE(컬럼,' ','') LIKE '%공백없는키워드%' 패턴 사용.
+"""
+
+GENERATE_QUERY_USER = """Schema (for reference):
+{schema}
+
+User Question: {question}
+
+Previous attempts and errors (if any):
+{history}
+
+SQL Query (raw SQL only, no backticks):"""
+
+ANSWER_SYSTEM = """당신은 탄소 배출계수 데이터베이스 분석 전문가입니다.
+사용자 질문, 실행된 SQL, DB 조회 결과를 바탕으로 한국어로 답변하세요.
+
+절대 규칙:
+1. DB 조회 결과의 숫자를 그대로 사용하세요. 절대 다른 값으로 바꾸지 마세요.
+2. 결과가 비어 있으면 "데이터베이스에서 해당 항목을 찾을 수 없습니다"라고만 답하세요.
+3. DB 결과에 없는 수치를 추가로 언급하지 마세요.
+4. 연료원별 사용 결과는 사용 부문(용도)별로 표로 정리하세요.
+"""
+
+ANSWER_USER = """질문: {question}
+실행된 SQL: {sql}
+DB 조회 결과: {result}"""
+
+
+def _sanitize_sql(text: str) -> str:
+    m = re.search(r"```(?:sql)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+    return (m.group(1) if m else text).strip()
+
 
 @lru_cache(maxsize=1)
-def _get_sql_agent():
+def _get_db_and_llm():
     db  = SQLDatabase.from_uri(f"sqlite:///{DB_PATH}")
     llm = ChatUpstage(model="solar-pro", temperature=0)
+    return db, llm
 
-    return create_sql_agent(
-        llm=llm,
-        db=db,
-        agent_type="openai-tools",
-        verbose=os.getenv("DEBUG", "false").lower() == "true",
-        prefix="""
-당신은 탄소 배출계수 데이터베이스 전문 SQL 분석가입니다.
 
-## 테이블 구조
+def _build_sql_pipeline():
+    db, llm = _get_db_and_llm()
+    schema_info = db.get_table_info()
 
-### 1. korea_lci — 국내 LCI 탄소배출계수
-| 컬럼 | 설명 | 예시 |
-|------|------|------|
-| 대분류 | 품목 대분류 | '원료 및 에너지 생산', '수송' |
-| 구분 | 중분류 | '건축자재', '화학제품' |
-| 품목명 | 세부 품목명 | '1종 포틀랜드 시멘트' |
-| 단위 | 기준 단위 | 'kg', 'MJ', 'km' |
-| 탄소배출계수 | kg CO2eq / 단위 | 0.926326 |
+    generate_prompt = ChatPromptTemplate.from_messages([
+        ("system", GENERATE_QUERY_SYSTEM),
+        ("user",   GENERATE_QUERY_USER),
+    ])
+    answer_prompt = ChatPromptTemplate.from_messages([
+        ("system", ANSWER_SYSTEM),
+        ("user",   ANSWER_USER),
+    ])
 
-### 2. defra_scope3 — DEFRA Scope3 배출계수 (해외 출장/운송)
-| 컬럼 | 설명 | 예시 |
-|------|------|------|
-| 카테고리(한글) | 활동 유형 한글명 | '항공 출장', '육상 출장' |
-| 영문_대분류 | 영문 대분류 | 'Flights', 'Cars (by market segment)' |
-| 영문_소분류 | 영문 세부 분류 | 'Domestic, to/from UK', 'Mini' |
-| 단위 | 기준 단위 | 'passenger.km', 'km' |
-| 탄소배출계수 | kg CO2eq / 단위 | 0.272577 |
+    def generate_query(state: MessagesState):
+        print("##### GENERATE QUERY #####")
+        question = state["messages"][0].content
+        history  = "\n".join(
+            m.content for m in state["messages"][1:]
+            if hasattr(m, "content") and m.content
+        )
+        response = llm.invoke(generate_prompt.format_messages(
+            schema=schema_info,
+            question=question,
+            history=history or "없음",
+        ))
+        print(f"생성된 SQL:\n{response.content}")
+        return {"messages": [response]}
 
-### 3. epa_spend — EPA 지출 기반 배출계수 (Scope3 구매)
-| 컬럼 | 설명 | 예시 |
-|------|------|------|
-| 카테고리(한글) | 산업/품목 한글명 | '대두 농업', '철강 제조' |
-| 영문_산업분류명 | 영문 산업분류 | 'Soybean Farming' |
-| 탄소배출계수(kg CO2e/1만원) | 1만원 지출 기준 | 11.5909 |
-| 탄소배출계수(kg CO2e/USD) | 1달러 지출 기준 | 1.326 |
+    def execute_query(state: MessagesState):
+        print("##### EXECUTE QUERY #####")
+        raw_sql = state["messages"][-1].content
+        sql     = _sanitize_sql(raw_sql)
+        result  = db.run_no_throw(sql)
+        print(f"실행 결과: {result}")
+        if not result:
+            result = "Error: 쿼리 실행 실패 또는 결과 없음. 다른 키워드나 컬럼으로 재시도하세요."
+        return {"messages": [AIMessage(content=str(result))]}
 
-## 쿼리 작성 지침
-1. 품목/활동 검색 시 LIKE '%키워드%' 로 유연하게 검색
-2. 탄소 배출량 계산 시: 활동량 × 탄소배출계수
-3. epa_spend는 구매 금액 기반, 나머지는 활동량(무게/거리) 기반
-4. 컬럼명에 괄호가 있으므로 반드시 큰따옴표로 감쌀 것 (예: "탄소배출계수(kg CO2e/1만원)")
-        """,
+    def answer(state: MessagesState):
+        print("##### ANSWER #####")
+        question = state["messages"][0].content
+        sql      = state["messages"][-2].content
+        result   = state["messages"][-1].content
+        response = llm.invoke(answer_prompt.format_messages(
+            question=question, sql=sql, result=result,
+        ))
+        return {"messages": [response]}
+
+    def should_retry(state: MessagesState):
+        last_content = state["messages"][-1].content
+        error_count  = sum(
+            1 for m in state["messages"]
+            if hasattr(m, "content") and "Error:" in (m.content or "")
+        )
+        if ("Error:" in last_content or "error" in last_content.lower()) and error_count < 2:
+            print(f"오류 감지 → 쿼리 재생성 (시도 {error_count + 1}/2)")
+            return "generate_query"
+        return "answer"
+
+    graph = StateGraph(MessagesState)
+    graph.add_node("generate_query", generate_query)
+    graph.add_node("execute_query",  execute_query)
+    graph.add_node("answer",         answer)
+    graph.add_edge(START,            "generate_query")
+    graph.add_edge("generate_query", "execute_query")
+    graph.add_conditional_edges(
+        "execute_query", should_retry,
+        {"generate_query": "generate_query", "answer": "answer"},
     )
+    graph.add_edge("answer", END)
+    return graph.compile()
+
+
+@lru_cache(maxsize=1)
+def _get_sql_pipeline():
+    return _build_sql_pipeline()
 
 
 @tool
@@ -111,8 +288,9 @@ def search_emission_factor(query: str) -> str:
        - 예: "철강 구매 배출계수", "1만원당 IT장비 탄소 배출량"
     """
     try:
-        result = _get_sql_agent().invoke({"input": query})
-        return result["output"]
+        pipeline = _get_sql_pipeline()
+        result   = pipeline.invoke({"messages": [{"role": "user", "content": query}]})
+        return result["messages"][-1].content
     except Exception as e:
         print(f"[search_emission_factor ERROR] {e}")
         raise
