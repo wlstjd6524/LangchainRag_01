@@ -2,18 +2,17 @@ import pickle
 import os
 import time
 from collections import defaultdict
+from typing import Literal
 from langchain_upstage import ChatUpstage
 from langgraph.prebuilt import create_react_agent
-from tools import tools
-from middleware.logger import LoggingCallbackHandler, log_request, log_response
-from typing import Literal
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, START, END, MessagesState
+from tools import tools
+from middleware.logger import LoggingCallbackHandler, log_request, log_response
 
 VECTORSTORE_DIR = "./vectorstore"
 BM25_CACHE_FILE = os.path.join(VECTORSTORE_DIR, "bm25_docs.pkl")
-
 
 def build_system_prompt() -> str:
     """
@@ -24,7 +23,7 @@ def build_system_prompt() -> str:
 기업의 ESG(환경·사회·지배구조) 공시 관련 질문에 답변하고, 보고서 작성을 지원합니다.
 
 ## ⚠️ 최우선 규칙: 숫자 날조 절대 금지
-배출계수·탄소 배출량·에너지 사용량 등 **모든 수치**는 반드시 도구를 호출하여 데이터베이스에서 가져와야 합니다.
+모든 수치는 반드시 도구를 호출하여 데이터베이스에서 가져와야 하며, 추측 답변을 엄격히 금지합니다.
 
 **search_emission_factor 툴 호출 필수 조건 (아래 중 하나라도 해당하면 무조건 호출)**
 1. "배출계수", "탄소배출계수", "발생계수" 단어가 포함된 질문
@@ -60,7 +59,7 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 ## 도구 선택 기준
 | 질문 유형 | 사용 도구 |
 |-----------|-----------|
-| ESG 정책, 가이드라인, 보고서 내용 | search_esg_guideline |
+| ESG 정책, 가이드라인, 보고서 내용, 침해사고 대응 매뉴얼, 보안 인증제도 절차 및 수수료 검색 | search_esg_guideline |
 | 품목·원자재·에너지 배출계수 조회 | search_emission_factor |
 | 출장·운송 배출량 계산 | search_emission_factor |
 | 구매 금액 기반 Scope3 배출량 | search_emission_factor |
@@ -71,6 +70,8 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 | 직원 다양성 KPI 계산 | calculate_employee_kpi |
 | ESG 법령·규제 최신 동향 검색 | search_esg_regulation |
 | 윤리규범 자가 점검 및 리스크 진단 | score_ethics_risk |
+| 기업 보안 정책 진단 및 인증 기준(ISMS-P, ISO27001) 누락 항목 분석 | analyze_security_compliance_gap |
+| 동종업계 지배구조(G) 벤치마킹 | fetch_governance_benchmark |
 
 ## score_ethics_risk 툴 호출 규칙
 1. 사용자가 윤리규범 현황을 언급하면, 언급된 정보만으로 즉시 툴을 호출합니다.
@@ -86,6 +87,10 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 5. 출처(기업명, 연도, 문서 유형)를 답변에 항상 포함하세요.
 6. 가이드라인과 실제 기업 사례를 함께 제시하면 더욱 유용한 답변이 됩니다.
 7. search_emission_factor 도구 사용 시, 사용자가 입력한 **'정확한 품목명 전체(예: 1종 포틀랜드 시멘트)'**를 그대로 검색어(Query)로 사용하세요. 대충 요약해서 검색하지 마세요.
+8. 검색된 결과 중 정제한 마크다운(MD) 형식의 데이터가 있다면, 이를 최우선적으로 참조하여 수치의 정확성을 확보하세요.
+9.[G-Benchmarking 출력 규칙]
+       - 단순 현황 조회 시: (1)이사회 구성 (2)윤리강령 (3)위원회 현황으로 구분하여 3줄로 핵심만 요약하세요.
+       - 비교 분석/벤치마킹 요청 시: 마크다운 표(Table)를 활용하여 업종 평균 및 선도 기업과 대조하여 상세히 답변하세요.
 
 ## 특별 주의 사항 (강제 룰)
 1. [다중 항목 계산] 질문에 계산해야 할 항목이 여러 개(예: 항공 출장 + 호텔 숙박)라면, 절대로 한 번에 암산하지 마세요. 반드시 각 항목별로 `search_emission_factor`와 `calculate_carbon_emission`을 개별적으로 순차 호출한 뒤, 마지막에 결과값을 합산하세요.
@@ -97,67 +102,48 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 """
 
     try:
+        if not os.path.exists(BM25_CACHE_FILE):
+             raise FileNotFoundError("BM25 캐시 파일이 없습니다.")
+
         with open(BM25_CACHE_FILE, "rb") as f:
             docs = pickle.load(f)
 
-        # 메타데이터 수집: {company: {year: set(doc_category)}}
         tree = defaultdict(lambda: defaultdict(set))
+        all_categories = set()
         for doc in docs:
             meta = doc.metadata
-            company = meta.get('company', '알수없음')
-            year = meta.get('year', '?')
-            category = meta.get('doc_category', '문서')
-            tree[company][year].add(category)
+            tree[meta.get('company', '알수없음')][meta.get('year', '?')].add(meta.get('doc_category', '문서'))
+            all_categories.add(meta.get('doc_category', '문서'))
 
-        # 공통 가이드라인과 기업 보고서 분리
-        common_lines  = []
-        company_lines = []
-        all_categories = set()
+        company_lines = [f"  - {c}: {', '.join(sorted(cats))} ({y})" 
+                         for c, years in sorted(tree.items()) 
+                         for y, cats in sorted(years.items())]
 
-        for company, years in sorted(tree.items()):
-            for year, categories in sorted(years.items()):
-                all_categories.update(categories)
-                cats = ', '.join(sorted(categories))
-                if company == '공통':
-                    common_lines.append(f"  - ({year}) {cats}")
-                else:
-                    company_lines.append(f"  - {company}: {cats} ({year})")
-
-        doc_list = ""
-        if company_lines:
-            doc_list += "[기업 보고서]\n" + "\n".join(company_lines)
-        if common_lines:
-            doc_list += "\n\n[공통 가이드라인] company='공통'으로 검색:\n" + "\n".join(common_lines)
-
+        doc_list = "[기업 보고서 목록]\n" + "\n".join(company_lines)
         category_list = "\n".join(f"  - '{c}'" for c in sorted(all_categories))
 
-        return base_prompt.format(
-            doc_list=doc_list,
-            category_list=category_list
-        )
-
+        return base_prompt.format(doc_list=doc_list, category_list=category_list)
     except Exception:
         return base_prompt.format(
             doc_list="  (데이터베이스 미초기화 — ingest.py를 먼저 실행하세요)",
             category_list="  (데이터베이스 미초기화)"
         )
 
-
+# 1. ESG 태스크 에이전트 (React Agent)
 llm = ChatUpstage(model="solar-pro", temperature=0)
-
 esg_agent = create_react_agent(
     model=llm,
-    tools=tools,
+    tools=tools, 
     prompt=build_system_prompt(),
 )
 
-# Router Agent
+# 2. 일상 대화 노드 (Chitchat)
 def chitchat_node(state: MessagesState):
     prompt = "당신은 ESG 공시 가이드 AI입니다. 사용자에게 친절하고 간결하게 인사하거나 대답해주세요. 도구(Tool)를 쓸 필요는 없습니다."
     response = llm.invoke([{"role": "system", "content": prompt}] + state["messages"])
     return {"messages": [response]}
 
-
+# 3. 라우터 로직 (Router)
 class RouteQuery(BaseModel):
     destination: Literal["chitchat", "esg_task"] = Field(
         description="일상 대화면 'chitchat', 전문 작업(데이터 검색, 계산 등) 이면 'esg_task'를 선택하세요."
@@ -165,26 +151,17 @@ class RouteQuery(BaseModel):
 
 router_prompt = ChatPromptTemplate.from_messages([
     ("system", """당신은 팀의 통합 AI 파이프라인 최상위 트래픽 라우터입니다.
-사용자의 질문 의도를 분석하여 가장 적절한 경로로 연결하세요.
-
-[분류 기준]
-1. chitchat: "안녕", "고마워", "넌 누구야" 등 도구 호출이 전혀 필요 없는 단순 인사나 일상 대화.
-2. esg_task: 기업 ESG 가이드라인 검색, 탄소/수자원 계산, 관련 뉴스 검색 등 팀원들이 구축한 데이터베이스나 도구(Tool)를 활용해야 하는 모든 전문적인 질문.
-"""),
+사용자의 질문 의도를 분석하여 가장 적절한 경로로 연결하세요."""),
     ("user", "{question}")
 ])
-
 router_chain = router_prompt | llm.with_structured_output(RouteQuery)
-
 
 def route_question(state: MessagesState):
     question = state["messages"][-1].content
-    print(f"[Router] 질문 의도 분석 : '{question}'")
     decision = router_chain.invoke({"question": question})
-    print(f"분류 결과 : [{decision.destination}] 노드로 이동합니다.\n")
     return decision.destination
 
-
+# 4. 전체 마스터 그래프 구축
 builder = StateGraph(MessagesState)
 builder.add_node("chitchat", chitchat_node)
 builder.add_node("esg_task", esg_agent)
@@ -194,12 +171,11 @@ builder.add_edge("esg_task", END)
 
 master_agent = builder.compile()
 
-
 def run(messages: list) -> str:
+    """최종 엔트리 포인트"""
     log_request(str(messages[-1].content) if messages else "")
-
     callback = LoggingCallbackHandler()
-    start = time.time()
+    start_time = time.time()
 
     try:
         result = master_agent.invoke(
@@ -210,7 +186,7 @@ def run(messages: list) -> str:
             },
         )
         response = result["messages"][-1].content
-        log_response(response, time.time() - start, callback.tool_call_count)
+        log_response(response, time.time() - start_time, callback.tool_call_count)
         return response
     except Exception as e:
         return f"⚠️ 에이전트 실행 중 오류가 발생했습니다: {str(e)}"
