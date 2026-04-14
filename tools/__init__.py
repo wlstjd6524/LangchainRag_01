@@ -2,6 +2,7 @@
 # 각 팀원이 개발한 툴을 이 파일에 import해서 tools 리스트에 추가하세요.
 
 from .calculate_carbon import calculate_carbon_emission
+from .analyze_security_compliance_gap import analyze_security_compliance_gap
 from .search_pdf import search_pdf_tool
 from .web_search import web_search_esg
 from .water_recycling import analyze_water_resource_circulation
@@ -27,7 +28,8 @@ tools = [
     load_csv_data,
     search_emission_factor,
     generate_report,
-    fetch_governance_benchmark
+    fetch_governance_benchmark,      
+    analyze_security_compliance_gap   
 ]
 
 # 패키지 외부 노출 설정
