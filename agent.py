@@ -7,9 +7,9 @@ from langgraph.prebuilt import create_react_agent
 from tools import tools
 from middleware.logger import LoggingCallbackHandler, log_request, log_response
 
+# 전역 설정
 VECTORSTORE_DIR = "./vectorstore"
 BM25_CACHE_FILE = os.path.join(VECTORSTORE_DIR, "bm25_docs.pkl")
-
 
 def build_system_prompt() -> str:
     """
@@ -48,6 +48,7 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 | 직원 다양성 KPI 계산 | calculate_employee_kpi |
 | ESG 법령·규제 최신 동향 검색 | search_esg_regulation |
 | 윤리규범 자가 점검 및 리스크 진단 | score_ethics_risk |
+| 동종업계 지배구조(G) 벤치마킹 | fetch_governance_benchmark |
 
 ## score_ethics_risk 툴 호출 규칙
 1. 사용자가 윤리규범 현황을 언급하면, 언급된 정보만으로 즉시 툴을 호출합니다.
@@ -58,88 +59,65 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
 ## 답변 원칙
 1. 질문에 특정 기업·연도·문서 유형이 언급되면 해당 필터를 사용해 검색하세요.
 2. 검색 결과가 없으면 필터를 하나씩 제거하며 재검색하세요 (좁은 범위 → 넓은 범위).
-3. 탄소 배출량 계산 시 배출계수가 필요하면 search_emission_factor로 먼저 조회하세요.
-4. 계산 과정을 단계별로 명확히 보여주세요.
-5. 출처(기업명, 연도, 문서 유형)를 답변에 항상 포함하세요.
-6. 가이드라인과 실제 기업 사례를 함께 제시하면 더욱 유용한 답변이 됩니다.
+3. [데이터 우선순위] 검색된 결과 중 정제한 마크다운(MD) 형식의 데이터가 있다면, 이를 최우선적으로 참조하여 수치의 정확성을 확보하세요.
+4. `fetch_governance_benchmark` 호출 시, 결과는 반드시 (1)이사회 구성 (2)윤리강령 (3)위원회 현황으로 구분하여 3줄로 핵심만 요약하세요.
+5. 탄소 배출량 계산 시 배출계수가 필요하면 search_emission_factor로 먼저 조회하세요.
+6. 계산 과정을 단계별로 명확히 보여주세요.
+7. 출처(기업명, 연도, 문서 유형)를 답변에 항상 포함하세요.
+8. 가이드라인과 실제 기업 사례를 함께 제시하면 더욱 유용한 답변이 됩니다.
+9. search_emission_factor 도구 사용 시, 사용자가 입력한 **'정확한 품목명 전체'**를 그대로 검색어(Query)로 사용하세요. 대충 요약하지 마세요.
 
 ## 특별 주의 사항 (강제 룰)
-1. [다중 항목 계산] 질문에 계산해야 할 항목이 여러 개(예: 항공 출장 + 호텔 숙박)라면, 절대로 한 번에 암산하지 마세요. 반드시 각 항목별로 `search_emission_factor`와 `calculate_carbon_emission`을 개별적으로 순차 호출한 뒤, 마지막에 결과값을 합산하세요.
-2. [Scope 분류] 출장, 숙박, 교통수단 이용 등은 반드시 '간접 배출(Scope3)'로 명시하세요.
-3. [결과물 포맷] 마크다운 형식을 사용하여 표, 볼드체, 리스트 등으로 중소기업 담당자도 이해하기 쉽게 작성하세요.
-4. [실시간 환율 연동] 구매 지출 기반(epa_spend) 배출량을 원화(KRW)로 계산할 경우, 반드시 `web_search_esg` 도구를 사용해 오늘의 실시간 USD/KRW 환율을 검색하세요. 검색된 환율로 원화 지출액을 USD로 변환한 뒤, DB의 '탄소배출계수(kg CO2e/USD)'를 적용하여 계산하세요.
-5. [답변 형식] 사용한 도구 이름, 재검색 안내, 내부 동작 과정은 절대 답변에 포함하지 마세요. 사용자는 도구의 존재를 알 필요가 없습니다.
-6. [ESG 가이드라인·보고서 질문] ESG 가이드라인, 기업 보고서, 공시 항목 관련 질문은 반드시 search_esg_guideline 툴을 호출하세요. 적합한 문서가 없을 데이터베이스에 없을 경우 자체 지식 말고 검색해서 답변할지 사용자에게 제안하세요.
+1. [다중 항목 계산] 여러 항목 계산 시 암산 금지. 각 항목별로 도구를 순차 호출한 뒤 합산하세요.
+2. [Scope 분류] 출장, 숙박 등은 반드시 '간접 배출(Scope3)'로 명시하세요.
+3. [결과물 포맷] 마크다운 형식을 사용하여 표, 볼드체, 리스트 등으로 작성하세요.
+4. [실시간 환율 연동] epa_spend 계산 시 반드시 `web_search_esg`로 실시간 환율을 검색하여 반영하세요.
+5. [답변 형식] 사용한 도구 이름, 내부 동작 과정은 절대 답변에 포함하지 마세요.
+6. [ESG 가이드라인·보고서 질문] 해당 질문은 반드시 search_esg_guideline 툴을 호출하세요.
 """
 
     try:
         with open(BM25_CACHE_FILE, "rb") as f:
             docs = pickle.load(f)
 
-        # 메타데이터 수집: {company: {year: set(doc_category)}}
         tree = defaultdict(lambda: defaultdict(set))
+        all_categories = set()
         for doc in docs:
             meta = doc.metadata
-            company = meta.get('company', '알수없음')
-            year = meta.get('year', '?')
-            category = meta.get('doc_category', '문서')
-            tree[company][year].add(category)
+            tree[meta.get('company', '알수없음')][meta.get('year', '?')].add(meta.get('doc_category', '문서'))
+            all_categories.update(tree[meta.get('company', '알수없음')][meta.get('year', '?')])
 
-        # 공통 가이드라인과 기업 보고서 분리
-        common_lines  = []
-        company_lines = []
-        all_categories = set()
+        company_lines = [f"  - {c}: {', '.join(sorted(cats))} ({y})" 
+                         for c, years in sorted(tree.items()) 
+                         for y, cats in sorted(years.items())]
 
-        for company, years in sorted(tree.items()):
-            for year, categories in sorted(years.items()):
-                all_categories.update(categories)
-                cats = ', '.join(sorted(categories))
-                if company == '공통':
-                    common_lines.append(f"  - ({year}) {cats}")
-                else:
-                    company_lines.append(f"  - {company}: {cats} ({year})")
-
-        doc_list = ""
-        if company_lines:
-            doc_list += "[기업 보고서]\n" + "\n".join(company_lines)
-        if common_lines:
-            doc_list += "\n\n[공통 가이드라인] company='공통'으로 검색:\n" + "\n".join(common_lines)
-
+        doc_list = "[기업 보고서 목록]\n" + "\n".join(company_lines)
         category_list = "\n".join(f"  - '{c}'" for c in sorted(all_categories))
 
-        return base_prompt.format(
-            doc_list=doc_list,
-            category_list=category_list
-        )
+        return base_prompt.format(doc_list=doc_list, category_list=category_list)
+    except:
+        return base_prompt.format(doc_list=" (DB 미초기화)", category_list=" (N/A)")
 
-    except Exception:
-        # BM25 캐시가 없을 경우 (ingest.py 미실행 상태) 기본 프롬프트 반환
-        return base_prompt.format(
-            doc_list="  (데이터베이스 미초기화 — ingest.py를 먼저 실행하세요)",
-            category_list="  (데이터베이스 미초기화)"
-        )
-
-
+# 에이전트 초기화
 llm = ChatUpstage(model="solar-pro", temperature=0)
 
 agent = create_react_agent(
     model=llm,
-    tools=tools,
+    tools=tools, 
     prompt=build_system_prompt(),
 )
-
 
 def run(messages: list) -> str:
     log_request(str(messages[-1].content) if messages else "")
     callback = LoggingCallbackHandler()
-    start = time.time()
+    start_time = time.time()
     try:
         result = agent.invoke(
             {"messages": messages},
             config={"recursion_limit": 10, "callbacks": [callback]},
         )
         response = result["messages"][-1].content
-        log_response(response, time.time() - start, callback.tool_call_count)
+        log_response(response, time.time() - start_time, callback.tool_call_count)
         return response
     except Exception as e:
         return f"⚠️ 에이전트 실행 중 오류가 발생했습니다: {str(e)}"
