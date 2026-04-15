@@ -1,49 +1,107 @@
 import os
+import tempfile
+from datetime import datetime
 from dotenv import load_dotenv
 import gradio as gr
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage
 from agent import run
 
 load_dotenv()
 
-def chat(message: str, history: list, file) -> str:
+
+def respond(message: str, chat_history: list, file, langchain_messages: list):
+    if not message.strip():
+        return "", chat_history, langchain_messages
+
+    user_message = message
     if file is not None:
-        message = f"{message}\n파일 경로: {file.name}"
+        user_message = f"{message}\n파일 경로: {file.name}"
 
-    langchain_messages = []
-
-    for msg in history:
-        if msg["role"] == "user":
-            langchain_messages.append(HumanMessage(content=msg["content"]))
-        elif msg["role"] == "assistant":
-            langchain_messages.append(AIMessage(content=msg["content"]))
-
-    langchain_messages.append(HumanMessage(content=message))
+    langchain_messages = list(langchain_messages)
+    langchain_messages.append(HumanMessage(content=user_message))
 
     try:
-        return run(langchain_messages)
+        response, updated_messages = run(langchain_messages)
     except Exception as e:
-        return f"⚠️ 오류가 발생했습니다: {str(e)}"
+        response = f"⚠️ 오류가 발생했습니다: {str(e)}"
+        updated_messages = langchain_messages
+
+    chat_history = chat_history + [
+        {"role": "user",      "content": message},
+        {"role": "assistant", "content": response},
+    ]
+
+    return "", chat_history, updated_messages
 
 
-demo = gr.ChatInterface(
-    fn=chat,
+def save_chat(chat_history: list):
+    if not chat_history:
+        return gr.File(visible=False)
+
+    lines = [
+        "ESG 공시 가이드 에이전트 대화 기록",
+        f"저장 일시: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "=" * 60,
+        "",
+    ]
+    for msg in chat_history:
+        role = "사용자" if msg["role"] == "user" else "에이전트"
+        content = msg["content"]
+        if isinstance(content, list):
+            content = " ".join(str(c) for c in content if c)
+        lines.append(f"[{role}]")
+        lines.append(str(content))
+        lines.append("")
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", delete=False, encoding="utf-8"
+    ) as f:
+        f.write("\n".join(lines))
+        return gr.File(value=f.name, visible=True)
+
+
+with gr.Blocks(
     title="🌱 ESG 공시 가이드 에이전트",
-    description="ESG 공시 관련 질문을 입력하세요. 가이드라인 검색, 보고서 초안 작성 등을 도와드립니다.",
-    additional_inputs=[
-        gr.File(label="CSV 파일 업로드", file_types=[".csv", ".pdf"]),
-    ],
-    examples=[
-        ["전력을 500kWh 사용했을 때 탄소 배출량은?", None],
-        ["2025년 SK하이닉스 지속가능경영보고서의 핵심 내용을 요약해줘.", None],
-        ["SK텔레콤의 TCFD 보고서에서 기후 리스크 관리 방안을 찾아줘.", None],
-        ["K-ESG 가이드라인에서 환경 부문 평가 항목을 알려줘.", None],
-        ["방금 계산해 준 탄소 배출량을 줄일 수 있는 방안을 ESG 가이드라인에서 찾아줄래?", None],
-        ["시멘트 1kg 생산 시 탄소 배출계수는 얼마야?", None],
-        ["철강 구매에 100만원을 지출했을 때 Scope3 탄소 배출량은?", None],
+    css=".chatbot { height: calc(100vh - 280px) !important; }",
+) as demo:
+    file_state      = gr.State(value=None)
+    messages_state  = gr.State(value=[])   # 요약이 반영된 langchain 메시지
 
-    ],
-)
+    gr.Markdown("# 🌱 ESG 공시 가이드 에이전트")
+    gr.Markdown("ESG 공시 관련 질문을 입력하세요. 가이드라인 검색, 보고서 초안 작성 등을 도와드립니다.")
+
+    chatbot = gr.Chatbot(height="calc(100vh - 280px)", type="messages")
+
+    with gr.Row():
+        msg_input  = gr.Textbox(
+            placeholder="질문을 입력하세요...",
+            scale=4,
+            show_label=False,
+            submit_btn=True,
+        )
+
+    with gr.Row(equal_height=True):
+        file_upload = gr.File(
+            label="CSV/PDF 파일 업로드",
+            file_types=[".csv", ".pdf"],
+        )
+        save_btn = gr.Button("💾 대화 저장", variant="secondary", scale=0, min_width=120)
+
+    download_file = gr.File(label="저장된 파일", visible=False)
+
+    # 메시지 전송
+    msg_input.submit(
+        fn=respond,
+        inputs=[msg_input, chatbot, file_state, messages_state],
+        outputs=[msg_input, chatbot, messages_state],
+    )
+
+    # 파일 업로드 시 state 갱신
+    file_upload.change(fn=lambda f: f, inputs=[file_upload], outputs=[file_state])
+
+    # 대화 저장
+    save_btn.click(fn=save_chat, inputs=[chatbot], outputs=[download_file])
+
 
 if __name__ == "__main__":
     demo.launch()
