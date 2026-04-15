@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, START, END, MessagesState
 from tools import tools
 from middleware.logger import LoggingCallbackHandler, log_request, log_response
+from middleware.summarizer import should_summarize, summarize_messages
 
 VECTORSTORE_DIR = "./vectorstore"
 BM25_CACHE_FILE = os.path.join(VECTORSTORE_DIR, "bm25_docs.pkl")
@@ -184,8 +185,17 @@ builder.add_edge("esg_task", END)
 
 master_agent = builder.compile()
 
-def run(messages: list) -> str:
-    """최종 엔트리 포인트"""
+def run(messages: list) -> tuple[str, list]:
+    """
+    최종 엔트리 포인트.
+    Returns:
+        (response, updated_messages): 응답 문자열과 요약이 반영된 메시지 리스트
+    """
+    from langchain_core.messages import AIMessage
+
+    if should_summarize(messages):
+        messages = summarize_messages(messages, llm)
+
     log_request(str(messages[-1].content) if messages else "")
     callback = LoggingCallbackHandler()
     start_time = time.time()
@@ -200,6 +210,8 @@ def run(messages: list) -> str:
         )
         response = result["messages"][-1].content
         log_response(response, time.time() - start_time, callback.tool_call_count)
-        return response
+        updated_messages = messages + [AIMessage(content=response)]
+        return response, updated_messages
     except Exception as e:
-        return f"⚠️ 에이전트 실행 중 오류가 발생했습니다: {str(e)}"
+        error_msg = f"⚠️ 에이전트 실행 중 오류가 발생했습니다: {str(e)}"
+        return error_msg, messages
