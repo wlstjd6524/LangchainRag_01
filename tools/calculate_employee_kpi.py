@@ -13,6 +13,7 @@ csv_loader.py의 load_csv_data()로 CSV를 파싱한 뒤,
 반환된 data 리스트를 employees 파라미터에 직접 전달합니다.
 """
 
+import json
 from langchain_core.tools import tool
 
 
@@ -246,6 +247,13 @@ def calculate_employee_kpi(employees: list[dict], metrics: list[str]) -> str:
     print("##### EMPLOYEE KPI TOOL #####")
     print(f"##### metrics: {metrics} #####")
 
+    if isinstance(employees, str):
+        try:
+            parsed = json.loads(employees)
+            employees = parsed.get("data", [])
+        except (json.JSONDecodeError, AttributeError):
+            return "오류: 직원 데이터 파싱 실패. CSV 파싱 결과의 직원 데이터 목록을 확인하세요."
+        
     if not employees:
         return "오류: 직원 데이터가 없습니다. load_csv_data()를 먼저 호출하세요."
 
