@@ -1,10 +1,13 @@
 import os
 import time
+import tempfile
+from datetime import datetime
 from dotenv import load_dotenv
 import gradio as gr
 from langchain_core.messages import HumanMessage, AIMessage
 
-from agent import master_agent, log_request, log_response, LoggingCallbackHandler
+from agent import master_agent, llm, log_request, log_response, LoggingCallbackHandler
+from middleware.summarizer import should_summarize, summarize_messages
 
 load_dotenv()
 
@@ -41,6 +44,10 @@ def chat(message: dict, history: list):
             langchain_messages.append(AIMessage(content=content))
 
     langchain_messages.append(HumanMessage(content=user_text))
+
+    # 메시지 수가 임계값 초과 시 오래된 대화를 요약하여 토큰 절약
+    if should_summarize(langchain_messages):
+        langchain_messages = summarize_messages(langchain_messages, llm)
 
     log_request(user_text) # 터미널 로깅
     callback = LoggingCallbackHandler()
@@ -121,7 +128,7 @@ button.primary { background-color: #2e7d32 !important; color: white !important; 
 textarea { border-radius: 12px !important; border: 1px solid #c8e6c9 !important; background-color: #fcfdfc !important;}
 """
 
-with gr.Blocks(css=custom_css, title="🌱 ESG 공시 가이드 에이전트", fill_width=True, fill_height=True) as demo:
+with gr.Blocks(title="🌱 ESG 공시 가이드 에이전트", fill_width=True, fill_height=True) as demo:
     with gr.Row():
         with gr.Column(scale=2, elem_id="sidebar-panel"):
             gr.Markdown("<h2 style='color: #1b5e20; margin-top:0;'>🌱 ESG 공시 가이드<br>AI 에이전트</h2>")
