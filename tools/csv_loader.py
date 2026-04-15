@@ -158,7 +158,7 @@ def load_csv_data(file_path: str) -> str:
             if val:
                 # Ture/1 -> True, 나머지 ->False로 변환
                 if std_col in BOOL_COLUMNS:
-                    std_row[std_col] = val.lower() in ("True", "1")
+                    std_row[std_col] = val.lower() in ("true", "1")
                 else:
                     try:
                         std_row[std_col] = float(val.replace(",", ""))
