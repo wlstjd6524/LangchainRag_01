@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, START, END, MessagesState
 from tools import tools
 from middleware.logger import LoggingCallbackHandler, log_request, log_response
+from middleware.summarizer import should_summarize, summarize_messages
 
 VECTORSTORE_DIR = "./vectorstore"
 BM25_CACHE_FILE = os.path.join(VECTORSTORE_DIR, "bm25_docs.pkl")
@@ -106,7 +107,8 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
              raise FileNotFoundError("BM25 캐시 파일이 없습니다.")
 
         with open(BM25_CACHE_FILE, "rb") as f:
-            docs = pickle.load(f)
+            raw = pickle.load(f)
+        docs = raw["docs"] if isinstance(raw, dict) else raw
 
         tree = defaultdict(lambda: defaultdict(set))
         all_categories = set()
@@ -157,8 +159,21 @@ router_prompt = ChatPromptTemplate.from_messages([
 router_chain = router_prompt | llm.with_structured_output(RouteQuery)
 
 def route_question(state: MessagesState):
+    '''
+    사용자 질문을 분석해 다음 목적지로 반환
+    '''
     question = state["messages"][-1].content
+    
+    # 🔥 이 print문들이 agent.py에 들어가야 터미널에 뜹니다!
+    print(f"\n===================================", flush=True)
+    print(f"🚦 [최상위 Router] 질문 의도 분석 시작...", flush=True)
+    print(f"▶ 사용자 입력: '{question}'", flush=True)
+
     decision = router_chain.invoke({"question": question})
+    
+    print(f"✅ 분류 완료: [{decision.destination}] 노드로 이동합니다!")
+    print(f"===================================\n", flush=True)
+
     return decision.destination
 
 # 4. 전체 마스터 그래프 구축
@@ -171,8 +186,17 @@ builder.add_edge("esg_task", END)
 
 master_agent = builder.compile()
 
-def run(messages: list) -> str:
-    """최종 엔트리 포인트"""
+def run(messages: list) -> tuple[str, list]:
+    """
+    최종 엔트리 포인트.
+    Returns:
+        (response, updated_messages): 응답 문자열과 요약이 반영된 메시지 리스트
+    """
+    from langchain_core.messages import AIMessage
+
+    if should_summarize(messages):
+        messages = summarize_messages(messages, llm)
+
     log_request(str(messages[-1].content) if messages else "")
     callback = LoggingCallbackHandler()
     start_time = time.time()
@@ -187,6 +211,8 @@ def run(messages: list) -> str:
         )
         response = result["messages"][-1].content
         log_response(response, time.time() - start_time, callback.tool_call_count)
-        return response
+        updated_messages = messages + [AIMessage(content=response)]
+        return response, updated_messages
     except Exception as e:
-        return f"⚠️ 에이전트 실행 중 오류가 발생했습니다: {str(e)}"
+        error_msg = f"⚠️ 에이전트 실행 중 오류가 발생했습니다: {str(e)}"
+        return error_msg, messages

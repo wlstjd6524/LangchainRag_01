@@ -14,6 +14,7 @@ from .csv_loader import load_csv_data
 from .search_csv import search_emission_factor
 from .report_generator import generate_report
 from .governance_benchmark import fetch_governance_benchmark
+from .compliance_gap_analysis import compliance_gap_analysis
 
 # 에이전트가 인식할 도구 리스트 정의
 tools = [
@@ -29,7 +30,8 @@ tools = [
     search_emission_factor,
     generate_report,
     fetch_governance_benchmark,      
-    analyze_security_compliance_gap   
+    analyze_security_compliance_gap,
+    compliance_gap_analysis, 
 ]
 
 # 패키지 외부 노출 설정
