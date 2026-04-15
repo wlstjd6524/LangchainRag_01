@@ -10,6 +10,9 @@ from langchain_chroma import Chroma
 from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import EnsembleRetriever
 import boto3
+from langchain_core.documents import Document
+from utils import morpheme_tokenize
+from rank_bm25 import BM25Okapi
 
 load_dotenv()
 
@@ -51,9 +54,29 @@ def _download_vectorstore_from_s3():
     return downloaded_count
 
 
+def _build_bm25_retriever(
+    docs: list[Document],
+    tokenized: list[list[str]],
+    k: int = 5,
+) -> BM25Retriever:
+    """
+    pre-tokenized corpus로 BM25Okapi 인덱스를 직접 구성하고 BM25Retriever를 반환한다.
+    쿼리 시에도 morpheme_tokenize가 적용된다.
+    """
+    bm25_index = BM25Okapi(tokenized)
+    retriever  = BM25Retriever(
+        vectorizer = bm25_index,
+        docs = docs,
+        k = k,
+        preprocess_func = morpheme_tokenize,
+    )
+    return retriever
+
+
 _db_ready = False
 vectorstore = None
-docs = []
+docs: list[Document] = []
+tokenized_corpus: list[list[str]] = []
 bm25_retriever = None
 
 try:
@@ -61,14 +84,36 @@ try:
     count = _download_vectorstore_from_s3()
     print(f"✅ {count}개 파일 다운로드 완료")
 
+    print("[1/3] Chroma 벡터 DB 로드 중...")
     embeddings = UpstageEmbeddings(model="solar-embedding-1-large-passage")
     vectorstore = Chroma(persist_directory=VECTORSTORE_DIR, embedding_function=embeddings)
+    print(f"[1/3] Chroma 로드 완료")
 
+    print("[2/3] BM25 캐시 로드 중...")
     with open(BM25_CACHE_FILE, "rb") as f:
-        docs = pickle.load(f)
+        raw = pickle.load(f)
 
-    bm25_retriever = BM25Retriever.from_documents(docs)
-    bm25_retriever.k = 5
+    if isinstance(raw, dict):
+        docs = raw["docs"]
+        tokenized_corpus = raw["tokenized"]
+        print("[2/3] BM25 캐시 로드 완료 (문서 {len(docs)}개, 형태소 토큰 캐시 보유)")
+    else:
+        # 레거시 list 포맷: 형태소 재토큰화 필요 (시간 소요)
+        docs = raw
+        print(f"[2/3] 레거시 BM25 캐시 감지 (문서 {len(docs)}개) — 형태소 재토큰화 중...")
+        print(" ※ 이 작업은 문서 수에 따라 수 분이 걸릴 수 있습니다.")
+        print(" ※ ingest.py를 재실행하면 다음부터는 이 단계가 생략됩니다.")
+        tokenized_corpus = []
+        for i, d in enumerate(docs):
+            tokenized_corpus.append(morpheme_tokenize(d.page_content))
+            if (i + 1) % 100 == 0:
+                print(f"    토큰화 진행: {i + 1}/{len(docs)}")
+        print(f"[2/3] 형태소 재토큰화 완료")
+
+    print("[3/3] BM25 인덱스 구성 중...")
+    bm25_retriever = _build_bm25_retriever(docs, tokenized_corpus, k=5)
+    print("[3/3] BM25 인덱스 구성 완료")
+
     _db_ready = True
     print("✅ RAG DB 로드 완료")
 
@@ -76,20 +121,31 @@ except Exception as e:
     print(f"⚠️ RAG DB 로드 실패: {e}\ningest.py를 먼저 실행해주세요.")
 
 
-def _get_filtered_bm25(year, company, doc_category) -> BM25Retriever:
-    filtered = docs
-    if year:
-        filtered = [d for d in filtered if d.metadata.get('year') == year]
-    if company:
-        filtered = [d for d in filtered if d.metadata.get('company') == company]
-    if doc_category:
-        filtered = [d for d in filtered if d.metadata.get('doc_category') == doc_category]
+def _get_filtered_bm25(
+    year: Optional[str] = None,
+    company: Optional[str] = None,
+    doc_category: Optional[str] = None,
+) -> BM25Retriever:
+    """
+    메타데이터 조건에 맞는 문서만으로 BM25 인덱스 재구성.
+    pre-tokenized corpus를 재사용하므로 빠름.
+    """
+    if not any([year, company, doc_category]):
+        return bm25_retriever
 
-    if filtered:
-        r = BM25Retriever.from_documents(filtered)
-        r.k = 5
-        return r
-    return bm25_retriever
+    filtered_pairs = [
+        (doc, tok)
+        for doc, tok in zip(docs, tokenized_corpus)
+        if (not year or doc.metadata.get("year") == year)
+        and (not company or doc.metadata.get("company") == company)
+        and (not doc_category or doc.metadata.get("doc_category") == doc_category)
+    ]
+
+    if not filtered_pairs:
+        return bm25_retriever
+
+    filtered_docs, filtered_tok = zip(*filtered_pairs)
+    return _build_bm25_retriever(list(filtered_docs), list(filtered_tok), k=5)
 
 
 class ESGRagInput(BaseModel):
@@ -114,7 +170,7 @@ def search_pdf_tool(
     query: str,
     year: Optional[str] = None,
     company: Optional[str] = None,
-    doc_category: Optional[str] = None
+    doc_category: Optional[str] = None,
 ) -> str:
     """
     ESG 가이드라인, 지속가능경영보고서 등에서 환경(E), 사회(S), 지배구조(G) 데이터를 검색합니다.
