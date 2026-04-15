@@ -1,7 +1,4 @@
-# tools/water_recycling.py
 from langchain_core.tools import tool
-# RAG 도구를 가져옵니다. (상대 경로 임포트)
-from .search_pdf import search_pdf_tool
 
 @tool
 def analyze_water_resource_circulation(
@@ -12,42 +9,39 @@ def analyze_water_resource_circulation(
     recycled_waste: float
 ) -> str:
     """
-    기업의 용수 이용 효율 및 자원 순환율을 분석하고 RAG를 통해 가이드라인을 조회합니다.
+    GRI 303(용수) 및 306(폐기물) 표준을 기반으로 기업의 자원 순환 지표를 산출하고 공시 현황을 분석함.
     """
     
-    print(f"##### [TOOL] ANALYZING WATER & RESOURCE: {industry} #####")
+    # 1. 지표 산출 로직
+    # 용수 재활용률 = (재활용 용수량 / 총 취수량)
+    water_rate = (recycled_water / total_withdrawal * 100) if total_withdrawal > 0 else 0
+    # 자원 순환율 = (재활용 폐기물량 / 총 폐기물량)
+    waste_rate = (recycled_waste / total_waste * 100) if total_waste > 0 else 0
 
-    # 1. 산술 계산 로직
-    # 용수 재활용률(%) = (재활용 용수량 / 총 취수량) * 100
-    water_rate = (recycled_water / total_withdrawal) * 100 if total_withdrawal > 0 else 0
-    # 자원 순환율(%) = (재활용 폐기물량 / 총 폐기물량) * 100
-    waste_rate = (recycled_waste / total_waste) * 100 if total_waste > 0 else 0
-
-    # 2. RAG 도구 호출 (K-ESG 가이드라인 기반)
-    rag_query = f"{industry} 업종의 용수 재활용 및 자원 순환 평가지표 평균"
-    
-    try:
-        rag_context = search_pdf_tool.invoke({
-            "query": rag_query,
-            "year": "공통",
-            "doc_category": "K-ESG가이드라인"
-        })
-    except Exception as e:
-        rag_context = f"⚠️ RAG 검색 중 오류가 발생했습니다: {str(e)}"
+    # 2. GRI 및 K-ESG 기반 정성적 상태 진단 (절대값 판단 지양)
+    # 측정 및 공시 여부 자체가 관리 수준의 척도임
+    def get_management_status(rate: float) -> str:
+        if rate > 0:
+            return "측정 및 관리 중 (공시 데이터 존재)"
+        return "데이터 미확인 (공시 체계 점검 필요)"
 
     # 3. 최종 분석 리포트 생성
-    report = (
-        f"## 💧 ESG 자원 순환 분석 리포트 ({industry})\n\n"
-        f"### 📊 분석 결과\n"
-        f"* **용수 재활용률:** `{water_rate:.2f}%` (재활용 {recycled_water} / 취수 {total_withdrawal})\n"
-        f"* **자원 순환율:** `{waste_rate:.2f}%` (재활용 {recycled_waste} / 발생 {total_waste})\n\n"
-        f"--- \n"
-        f"### 📚 K-ESG 가이드라인 검색 결과\n"
-        f"{rag_context}\n\n"
-        f"--- \n"
-        f"### 💡 전문가 제언\n"
-        f"입력하신 **{industry}** 산업군의 가이드라인과 비교했을 때, "
-        f"{'현재 자원 순환 시스템이 안정적으로 운영되고 있습니다.' if waste_rate > 50 else '폐기물 재활용 비중을 높이기 위한 프로세스 점검이 권고됩니다.'}"
-    )
+    report = [
+        f"## 💧 ESG 자원 순환 분석 결과 ({industry})",
+        "",
+        "### 📊 핵심 성과 지표 (KPI)",
+        f"| 항목 | 산출값 | 관리 상태 |",
+        f"| :--- | :--- | :--- |",
+        f"| **용수 재활용률** | `{water_rate:.2f}%` | {get_management_status(water_rate)} |",
+        f"| **자원 순환율** | `{waste_rate:.2f}%` | {get_management_status(waste_rate)} |",
+        "",
+        "---",
+        "### 💡 GRI 303/306 기반 전문가 제언",
+        f"1. **공시 투명성:** 현재 {industry} 업종 내에서 해당 수치를 측정하고 있다는 점 자체가 GRI 303-1, 306-2 가이드라인에 부합하는 관리의 시작입니다.",
+        f"2. **순환 경제 이행:** 단순 재활용률 수치보다 중요한 것은 '전년 대비 개선 추이'와 '재사용 프로세스의 구체성'입니다.",
+        "3. **권고 사항:** 해당 지표를 지속가능경영보고서 내 정량 데이터로 포함시키고, 취수원 및 폐기물 처리 경로에 대한 상세 영향 분석(Impact Assessment)을 병행하십시오.",
+        "",
+        "⚠️ **주의:** 타사 대비 수준이나 업종별 가이드라인 대조가 필요할 경우 `search_esg_guideline` 도구를 추가로 호출하여 비교 분석하시기 바랍니다."
+    ]
 
-    return report
+    return "\n".join(report)
