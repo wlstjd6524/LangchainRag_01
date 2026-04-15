@@ -157,8 +157,21 @@ router_prompt = ChatPromptTemplate.from_messages([
 router_chain = router_prompt | llm.with_structured_output(RouteQuery)
 
 def route_question(state: MessagesState):
+    '''
+    사용자 질문을 분석해 다음 목적지로 반환
+    '''
     question = state["messages"][-1].content
+    
+    # 🔥 이 print문들이 agent.py에 들어가야 터미널에 뜹니다!
+    print(f"\n===================================", flush=True)
+    print(f"🚦 [최상위 Router] 질문 의도 분석 시작...", flush=True)
+    print(f"▶ 사용자 입력: '{question}'", flush=True)
+
     decision = router_chain.invoke({"question": question})
+    
+    print(f"✅ 분류 완료: [{decision.destination}] 노드로 이동합니다!")
+    print(f"===================================\n", flush=True)
+
     return decision.destination
 
 # 4. 전체 마스터 그래프 구축
