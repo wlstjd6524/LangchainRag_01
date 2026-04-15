@@ -106,7 +106,8 @@ search_esg_guideline 도구로 아래 문서들을 검색할 수 있습니다.
              raise FileNotFoundError("BM25 캐시 파일이 없습니다.")
 
         with open(BM25_CACHE_FILE, "rb") as f:
-            docs = pickle.load(f)
+            raw = pickle.load(f)
+        docs = raw["docs"] if isinstance(raw, dict) else raw
 
         tree = defaultdict(lambda: defaultdict(set))
         all_categories = set()
