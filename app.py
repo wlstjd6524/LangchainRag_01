@@ -128,7 +128,7 @@ button.primary { background-color: #2e7d32 !important; color: white !important; 
 textarea { border-radius: 12px !important; border: 1px solid #c8e6c9 !important; background-color: #fcfdfc !important;}
 """
 
-with gr.Blocks(css=custom_css, title="🌱 ESG 공시 가이드 에이전트", fill_width=True, fill_height=True) as demo:
+with gr.Blocks(title="🌱 ESG 공시 가이드 에이전트", fill_width=True, fill_height=True) as demo:
     with gr.Row():
         with gr.Column(scale=2, elem_id="sidebar-panel"):
             gr.Markdown("<h2 style='color: #1b5e20; margin-top:0;'>🌱 ESG 공시 가이드<br>AI 에이전트</h2>")
