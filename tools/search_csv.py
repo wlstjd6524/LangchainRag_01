@@ -43,7 +43,7 @@ def _download_db_from_s3():
 _download_db_from_s3()
 
 GENERATE_QUERY_SYSTEM = """You are a SQLite SQL expert for a Korean carbon emission factor database.
-Output ONLY the raw SQL query. No explanation, no markdown, no backticks.
+Output the SQL query strictly inside a ```sql ... ``` code block. No explanation.
 NO DML statements (INSERT, UPDATE, DELETE, DROP).
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -150,6 +150,13 @@ Columns: 카테고리(한글), 영문_산업분류명,
 【공통 규칙】
 한국어 텍스트는 DB 내 띄어쓰기가 불일치함.
 모든 한국어 검색 시 REPLACE(컬럼,' ','') LIKE '%공백없는키워드%' 패턴 사용.
+
+🚨 [절대 준수: 토큰 폭주 및 무한 루프 방지 제약사항] 🚨
+1. 마크다운 필수: 쿼리가 끝났음을 시스템이 인지할 수 있도록, 반드시 ```sql 과 ``` 블록으로 쿼리를 감싸서 출력하세요.
+2. 다중 키워드 동시 검색 (매우 중요): 사용자가 '항공 출장'과 '호텔 숙박'처럼 여러 개를 동시에 물어볼 경우, 절대 SELECT 문을 여러 개 만들지 마세요. 단 1개의 SELECT 문 안에서 `WHERE (카테고리 LIKE '%항공%' OR 카테고리 LIKE '%호텔%')` 처럼 OR 조건으로 묶어서 한 번에 조회하세요.
+3. 단일 테이블 원칙: defra_scope3, epa_spend, korea_lci 중 단 1개의 테이블만 선택하세요. 테이블 간 UNION ALL은 절대 금지합니다.
+4. UNION ALL 예외: 오직 'korea_lci' 테이블 내부에서 일반 대분류와 '연료원별 사용'을 합칠 때만 예외적으로 UNION ALL을 허용합니다.
+5. LIMIT 5 문법: 결과 폭주를 막기 위해 전체 쿼리의 맨 마지막에 반드시 `LIMIT 5`를 딱 한 번만 붙이세요.
 """
 
 GENERATE_QUERY_USER = """Schema (for reference):

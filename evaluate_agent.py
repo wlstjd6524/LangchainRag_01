@@ -1,8 +1,12 @@
+import time
+
 from dotenv import load_dotenv
 from langsmith import Client
 from langsmith.evaluation import evaluate
 from agent import run  # 에이전트 실행 함수 임포트
 from langchain_upstage import ChatUpstage
+
+from langchain_core.messages import HumanMessage
 
 load_dotenv()
 client = Client()
@@ -14,7 +18,7 @@ def predict_esg_agent(inputs: dict) -> dict:
     print(f"에이전트 답변 생성 중 : {question[:30]}...")
 
     # agent.py 의 run 함수 호출
-    answer = run([("user", question)])
+    answer = run([HumanMessage(content=question)])
     return {"answer": answer}
 
 # 2. 평가자 설정 : QA 정확도 평가
@@ -45,6 +49,13 @@ def custom_qa_evaluator(inputs: dict, outputs: dict, reference_outputs: dict) ->
     # 결과에서 점수 파싱 (1점 또는 0점)
     score = 1 if "최종 점수: 1" in judge_response else 0
 
+    print("API 한도 방지를 위한 10초 대기")
+    time.sleep(20)
+
+    question = inputs["question"]
+    print(f"에이전트 답변 생성 중 : {question[:30]}...")
+
+    answer = run([HumanMessage(content=question)])
     # LangSmith 대시보드로 보낸 결과 포맷
     return {
         "key": "qa_correctness",        # 대시보드에 표시될 평가 항목이름
