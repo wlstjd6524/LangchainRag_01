@@ -75,7 +75,7 @@ def chat(message: dict, history: list):
 
 # UI 살짝 수정해보기
 custom_css = """
-/* 배경 및 스크롤 고정 */
+/* 1. 배경 및 전체 레이아웃 고정 */
 html, body { 
     height: 100vh !important; 
     margin: 0 !important; 
@@ -84,7 +84,6 @@ html, body {
     background-color: #f3f8f5 !important; 
 }
 
-/* 💡 수정 포인트 1: 바닥 여백만 30px로 늘리기 (위20 우20 아래30 왼쪽20) */
 .gradio-container { 
     max-width: 100% !important; 
     height: 100vh !important;
@@ -94,67 +93,124 @@ html, body {
 
 footer { display: none !important; }
 
-/* 💡 수정 포인트 2: 늘어난 바닥 여백만큼 패널 높이 계산식 수정 (위 20px + 아래 30px = 총 50px 빼기) */
+/* 2. 사이드바 패널 (Flex 해제하고 Block으로 강제 고정) */
 #sidebar-panel { 
     background-color: #ffffff !important; 
-    padding: 30px 25px !important; 
+    padding: 20px 15px !important; 
     height: calc(100vh - 50px) !important; 
     max-height: calc(100vh - 50px) !important; 
     border: 1px solid #d1d5db !important; 
     border-radius: 16px !important; 
     box-shadow: 0 4px 12px rgba(0,0,0,0.03) !important; 
+    
+    /* 세로 스크롤만 켜고, 튀어나가는 건 무조건 숨김 */
     overflow-y: auto !important; 
+    overflow-x: hidden !important; 
+    
+    /* 💡 Flex가 충돌의 주범이므로 block으로 강제 변경 */
+    display: block !important; 
     box-sizing: border-box !important;
 }
 
+/* 3. 💡 [핵심] 사이드바 내부의 '모든(*)' 요소에 족쇄 채우기 */
+#sidebar-panel * {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    /* 긴 한글/영문 가리지 않고 박스 끝에 닿으면 무조건 줄바꿈 */
+    white-space: pre-wrap !important; 
+    word-break: break-word !important; 
+    overflow-wrap: break-word !important;
+}
+
+/* 4. 리스트(점표)가 오른쪽으로 밀려나가는 현상 원천 차단 */
+#sidebar-panel ul {
+    padding-left: 20px !important;
+    margin-right: 0 !important;
+    width: 100% !important;
+}
+
+#sidebar-panel h2 {
+    margin-top: 0 !important;
+    white-space: normal !important;
+}
+
+/* 5. 스크롤바 & 챗봇 패널 디자인 */
 #sidebar-panel::-webkit-scrollbar { width: 6px; }
 #sidebar-panel::-webkit-scrollbar-thumb { background: #c8e6c9; border-radius: 10px; }
 
-/* 💡 수정 포인트 3: 챗봇 패널도 똑같이 높이 50px 빼주기 */
+/* 💡 [추가] 마크다운 내부 문단(p) 및 줄 간격 축소 */
+#sidebar-panel .prose p {
+    margin-top: 0.2em !important;
+    margin-bottom: 0.2em !important;
+    line-height: 1.4 !important;
+}
+
+/* 💡 [추가] 리스트(ul, li) 상하 여백 촘촘하게 압축 */
+#sidebar-panel .prose ul {
+    margin-top: 0.2em !important;
+    margin-bottom: 0.8em !important; /* 각 파트(E, S, G) 사이의 여백 */
+}
+
+#sidebar-panel .prose li {
+    margin-top: 0.1em !important;
+    margin-bottom: 0.1em !important;
+    line-height: 1.3 !important;
+}
+
+/* 💡 [추가] 소제목(h3) 위아래 여백 축소 */
+#sidebar-panel .prose h3 {
+    margin-top: 0.5em !important;
+    margin-bottom: 0.3em !important;
+}
+
 #chat-panel {
     background-color: #ffffff !important;
     height: calc(100vh - 50px) !important; 
-    max-height: calc(100vh - 50px) !important; 
-    padding: 20px 20px 20px 20px !important; 
+    padding: 20px !important; 
     border: 1px solid #d1d5db !important; 
     border-radius: 16px !important; 
     box-shadow: 0 4px 12px rgba(0,0,0,0.03) !important; 
-    box-sizing: border-box !important;
     overflow: hidden !important; 
 }
 
-/* 버튼 및 입력창 스타일 */
 button.primary { background-color: #2e7d32 !important; color: white !important; border-radius: 10px !important; }
 textarea { border-radius: 12px !important; border: 1px solid #c8e6c9 !important; background-color: #fcfdfc !important;}
 """
 
-with gr.Blocks(title="🌱 ESG 공시 가이드 에이전트", fill_width=True, fill_height=True) as demo:
+with gr.Blocks(title="🌱 ESG 공시 가이드 에이전트", fill_width=True, fill_height=True, css=custom_css) as demo:
     with gr.Row():
-        with gr.Column(scale=2, elem_id="sidebar-panel"):
+        with gr.Column(scale=3, elem_id="sidebar-panel"):
             gr.Markdown("<h2 style='color: #1b5e20; margin-top:0;'>🌱 ESG 공시 가이드<br>AI 에이전트</h2>")
             gr.Markdown("---")
             
             gr.Markdown("""
             ### ✨ 주요 기능
             
-            **[파트 A: 환경/ESG 공시]**
-            * 🏭 Scope 1, 2, 3 탄소 배출량 자동 계산
-            * 🏢 2025년 최신 기업 지속가능경영보고서 분석
-            * 🌿 K-ESG, TCFD 가이드라인 맞춤형 검색
-            
-            **[파트 B: 정보보안/컴플라이언스]**
-            * 🔒 ISMS-P 및 ISO27001 인증 기준 Gap 분석
-            * 🚨 랜섬웨어 등 침해사고 초기 대응 가이드
-            
-            **[파트 C: 팀원 추가 기능 (예시)]**
-            * 📊 ESG 평가 지표 시각화 대시보드
-            * 📝 공시 보고서 초안 자동 생성기
+            **[Part E: 환경 (Environment)]**
+            * 🏭 **탄소 배출량 산출:** Scope 1, 2, 3 배출량 자동 계산 및 데이터 분석
+            * ♻️ **자원 순환 진단:** 용수 재활용률 및 폐기물 순환 지표 산출 (GRI 303/306 기준)
+            * 🌿 **가이드라인 검색:** K-ESG, TCFD 등 최신 비정형 공시 가이드라인 지능형 검색 (RAG)
+
+            **[Part S: 사회 (Social)]**
+            * 👷 **산업안전 관리:** 중대재해처벌법 대응 LTIR/TRIR 지표 자동 산출 및 진단
+            * 👥 **인력 다양성 KPI:** 성별·연령·고용형태별 다양성 분석 및 K-ESG 점수 환산
+            * ⚖️ **노동법 가이드:** 기업 규모별 법정 의무교육 체크리스트 및 장애인 의무고용 현황 점검
+
+            **[Part G: 지배구조 (Governance)]**
+            * 📊 **이사회 벤치마킹:** OpenDART API 연동 실시간 상장사 지배구조 비교 분석
+            * 🔍 **규제 동향 검색:** 최신 ESG 법령, 공시 의무 및 뉴스 실시간 웹 탐색 (Tavily)
+            * 🛡️ **윤리 경영 진단:** 윤리규범 운영 상태 스코어링 및 리스크 등급/개선 권고 도출
+
+            **[Part 통합: 지능형 분석 및 리포팅]**
+            * 📉 **ESG 갭 분석:** 전 영역 데이터를 통합한 컴플라이언스 격차(Gap) 일괄 분석
+            * 📝 **보고서 자동화:** 분석 결과 기반 공시 보고서 초안 생성 및 Word 파일 다운로드
+            * 📁 **데이터 최적화:** 기업별 CSV 데이터 표준화 로드 및 대화 문맥 자동 요약 시스템
             """)
 
             gr.Markdown("---")
             gr.Markdown("**📁 첨부 가능 파일**\n* PDF 문서 (`.pdf`)\n* 데이터 파일 (`.csv`)\n\n*우측 하단 입력창의 🔗 버튼을 눌러 파일을 업로드하세요.*")
 
-        with gr.Column(scale=8, elem_id="chat-panel"):
+        with gr.Column(scale=7, elem_id="chat-panel"):
             gr.ChatInterface(
                 fn=chat,
                 multimodal=True,
@@ -176,4 +232,4 @@ with gr.Blocks(title="🌱 ESG 공시 가이드 에이전트", fill_width=True, 
             )
 
 if __name__ == "__main__":
-    demo.launch(css=custom_css)
+    demo.launch()
